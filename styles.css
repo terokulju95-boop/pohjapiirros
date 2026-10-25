@@ -265,11 +265,12 @@ a.pcard:active { transform: scale(.99); }
 /* Puhelin ja kapea näyttö */
 @media (max-width: 899px) {
   .ed-top:has(.ed-switch) .ed-title { display: none; }
-  .ed-switch { flex: 1; max-width: none; font-weight: 700; margin-left: 0; }
+  .ed-switch { flex: 1; max-width: none; min-width: 96px; font-weight: 700; margin-left: 0; }
+  .ed-top { gap: 2px; padding-left: 4px; padding-right: 4px; }
+  .ed-btn { min-width: 34px; }
   .ed-canvas:has(.ed-info:not([hidden])) .ed-hint { display: none; }
   .ed-btn { padding: 0 6px; }
   .ed-btn span { display: none; }
-  .ed-btn.ed-measure span { display: inline; }
   .ed-save { display: none; }
   .view { padding: 14px 16px 50px; }
   .calc { grid-template-columns: 1fr 1fr; }
@@ -323,3 +324,17 @@ a.pcard:active { transform: scale(.99); }
 .cat-search:focus { outline: 2px solid var(--pri); outline-offset: -1px; }
 .cat-h { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 6px; }
 .cat-h:first-child { margin-top: 0; }
+
+/* ---------- 3D-näkymä ---------- */
+.ed-body { position: relative; }
+.ed-3d { position: absolute; inset: 0; z-index: 6; background: var(--bg); }
+.v3-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.v3-load { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; text-align: center; color: var(--muted); padding: 20px; }
+.v3-bar { position: absolute; left: 10px; top: 10px; right: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid var(--line); border-radius: 14px; padding: 6px 10px; box-shadow: var(--shadow); width: fit-content; max-width: calc(100% - 20px); }
+.v3-bar .seg-mini { margin: 0; }
+.v3-bar .pc { font-size: .85rem; padding: 0; }
+.v3-hint { position: absolute; left: 12px; bottom: 10px; font-size: .78rem; color: var(--muted); pointer-events: none; text-shadow: 0 0 4px var(--bg); }
+.v3-walk { position: absolute; right: 14px; bottom: 14px; display: grid; gap: 8px; }
+.v3-walk button { width: 56px; height: 56px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); font-size: 1.3rem; box-shadow: var(--shadow); touch-action: none; user-select: none; }
+.ed-3dbtn { color: var(--pri); }
+@media (max-width: 899px) { .ed-3dbtn span { display: inline; } .v3-bar .pc span { font-size: .78rem; } }

@@ -6,6 +6,7 @@ import { renderPlan, dimLine, openingGeom, settingsOf, dataOf, LAYERS, DEFAULT_S
 import { KINDS, CATS, GROUPS, OPENINGS, ROOM_NAMES, STATUS, drawItem } from "./catalog.js";
 import { openQuantities } from "./quantities.js";
 import { openPrint } from "./print.js";
+import { H3D } from "./view3d.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const num = v => { const n = parseFloat(String(v ?? "").replace(/\s/g, "").replace(",", ".")); return isFinite(n) ? n : NaN; };
@@ -69,6 +70,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       <div class="ed-sp"></div>
       ${readOnly ? "" : `<button class="ed-btn" data-a="undo" title="Kumoa (Ctrl+Z)">${svgI(ICON.undo)}</button><button class="ed-btn" data-a="redo" title="Tee uudelleen (Ctrl+Y)">${svgI(ICON.redo)}</button><span class="ed-div"></span>`}
       ${readOnly ? `<button class="ed-btn ed-measure" data-a="measure" title="Mittaa kahden pisteen väli">${svgI(TOOLS.find(t => t[0] === "measure")[3])}<span>Mittaa</span></button><button class="ed-btn" data-a="layers" title="Tasot">${svgI(ICON.layers)}</button>` : ""}
+      <button class="ed-btn wide ed-3dbtn" data-a="3d" title="3D-näkymä">${svgI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>')}<span>3D</span></button>
       <button class="ed-btn" data-a="fit" title="Sovita näkymään (F)">${svgI(ICON.fit)}</button>
       <button class="ed-btn wide" data-a="qty" title="Määrät ja materiaalit">${svgI(ICON.list)}<span>Määrät</span></button>
       ${readOnly ? "" : `<button class="ed-btn wide" data-a="print" title="Tulosta mittakaavassa">${svgI(ICON.print)}<span>Tulosta</span></button>`}
@@ -459,6 +461,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         return H(esc(K.name)) + txt("i.label", "Nimi / merkintä", o.label || "") +
           `<div class="pf2">${inp("i.w", "Leveys", o.w)}${inp("i.d", "Syvyys", o.d)}</div><div class="pf2">${inp("i.x", "X", mm(o.x))}${inp("i.y", "Y", mm(o.y))}</div>` +
           inp("i.rot", "Kulma (°)", o.rot || 0) + (wallTag ? inp("i.h", "Asennuskorkeus lattiasta (mm)", o.h ?? "") : "") +
+          (K.cat === "kaluste" ? `<div class="pf2">${inp("i.zh", "3D-korkeus", o.zh ?? "", `placeholder="${H3D[o.kind]?.[0] ?? 600}"`)}${inp("i.ze", "Alareuna lattiasta", o.ze ?? "", `placeholder="${H3D[o.kind]?.[1] ?? 0}"`)}</div>` : "") +
           (K.hot ? H("Suojaetäisyydet") + `<p class="pn">Katso arvot kiukaan/tulisijan asennusohjeesta. Alue näkyy punaisena katkoviivana.</p><div class="pf2">${inp("i.sf", "Eteen", o.safe?.f || 0)}${inp("i.ss", "Sivuille", o.safe?.s || 0)}</div>${inp("i.sb", "Taakse", o.safe?.b || 0)}` : "") +
           txt("i.note", "Huomio", o.note || "") +
           `<div class="pbtns">${btn("rot90", "Käännä 90°")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
@@ -549,6 +552,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         if (key === "h") o.h = v === "" ? null : isFinite(n) ? n : o.h;
         if (key === "label") o.label = v;
         if (key === "note") o.note = v;
+        if (key === "zh" || key === "ze") { if (v === "") delete o[key]; else if (isFinite(n) && n >= 0) o[key] = n; }
         if (["sf", "ss", "sb"].includes(key)) { o.safe = { f: 0, s: 0, b: 0, ...(o.safe || {}) }; o.safe[key[1]] = isFinite(n) ? Math.max(0, n) : 0; }
       }
       if (g === "r") {
@@ -995,7 +999,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
   // ---------- Näppäimistö ----------
   function onKey(e) {
     if (live.destroyed) return;
-    if (document.querySelector("#modal.open") || root.querySelector(".ed-dlg-wrap")) return;
+    if (document.querySelector("#modal.open") || root.querySelector(".ed-dlg-wrap") || root.querySelector(".ed-3d")) return;
     const tag = e.target.tagName, typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
     if (typing) { if (e.key === "Enter" && tag === "INPUT") e.target.blur(); return; }
     const k = e.key, ctrl = e.ctrlKey || e.metaKey;
@@ -1064,7 +1068,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
   panelEl?.addEventListener("click", onPanelClick);
   panelEl?.addEventListener("input", e => { if (e.target.matches("[data-search]")) { E.search = e.target.value; panelEl.querySelector(".cat-list").innerHTML = catListHtml(); } });
   root.querySelector(".ed-switch")?.addEventListener("change", e => { flush(); onSwitch?.(e.target.value); });
-  root.addEventListener("click", e => {
+  const onRootClick = e => {
     const a = e.target.closest("[data-a]")?.dataset.a; if (!a) return;
     if (a === "back") { flush(); onBack?.(); }
     if (a === "rename" && !E.ro) { const n = prompt("Piirustuksen nimi", plan.name || ""); if (n && n.trim()) { plan.name = n.trim(); e.target.textContent = plan.name; onRename?.(plan.name); } }
@@ -1078,7 +1082,12 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     if (a === "measure") { setTool(E.tool === "measure" ? "pan" : "measure"); $("#ed-info").hidden = true; }
     if (a === "infoclose") { $("#ed-info").hidden = true; E.sel = []; draw(); }
     if (a === "layers") layersSheet();
-  });
+    if (a === "3d" && !root.querySelector(".ed-3d")) {
+      flush(); $("#ed-info").hidden = true;
+      import("./view3d.js").then(m => m.open3D(root.querySelector(".ed-body"), structuredClone(E.data), structuredClone(E.S), { title: (proj?.name || "") + " " + (plan.name || ""), onClose: () => { draw(); svg.focus({ preventScroll: true }); } }));
+    }
+  };
+  root.addEventListener("click", onRootClick);
   function layersSheet() {
     formSheet("Näytettävät tasot", [...LAYERS.map(([k, l]) => [k, l, E.S.layers[k], "check"]), ["_dims", "Seinien pituudet", E.S.showWallDims, "check"], ["_h", "Sähkörasioiden korkeudet", E.S.showHeights, "check"]], v => {
       for (const [k] of LAYERS) E.S.layers[k] = v[k];
@@ -1101,6 +1110,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     },
     destroy() {
       flush(); live.destroyed = true;
+      root.removeEventListener("click", onRootClick);
       document.removeEventListener("keydown", onKey); document.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("resize", onResize); window.removeEventListener("beforeunload", onUnload); window.removeEventListener("pagehide", onUnload);
       cancelAnimationFrame(raf);

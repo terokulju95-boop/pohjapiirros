@@ -1,11 +1,12 @@
 // Pohjapiirros – service worker: sovellus aukeaa myös ilman verkkoa.
 // Kun päivität sovelluksen tiedostoja GitHubiin, kasvata versionumeroa.
-const CACHE = "piirros-v3";
+const CACHE = "piirros-v4";
 const SDK = "https://www.gstatic.com/firebasejs/10.12.2/";
 const SHELL = ["./", "./index.html", "./styles.css", "./manifest.json", "./firebase-config.js",
   "./js/main.js", "./js/core.js", "./js/views/projects.js", "./js/views/users.js",
-  "./js/plan/geom.js", "./js/plan/catalog.js", "./js/plan/render.js", "./js/plan/templates.js", "./js/plan/editor.js", "./js/plan/quantities.js", "./js/plan/print.js",
+  "./js/plan/geom.js", "./js/plan/catalog.js", "./js/plan/render.js", "./js/plan/templates.js", "./js/plan/editor.js", "./js/plan/quantities.js", "./js/plan/print.js", "./js/plan/view3d.js",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon-32.png"];
+const THREE_CDN = "https://cdn.jsdelivr.net/npm/three@0.160.0/";
 const SDK_FILES = ["firebase-app.js", "firebase-auth.js", "firebase-firestore.js"].map(f => SDK + f);
 
 self.addEventListener("install", e => {
@@ -47,5 +48,5 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin === self.location.origin) e.respondWith(networkFirst(req));
-  else if (req.url.startsWith(SDK)) e.respondWith(cacheFirst(req));
+  else if (req.url.startsWith(SDK) || req.url.startsWith(THREE_CDN)) e.respondWith(cacheFirst(req));
 });
