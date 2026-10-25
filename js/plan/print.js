@@ -10,6 +10,8 @@ const SCALES = [10, 20, 25, 50, 100, 200];
 const MARGIN = 10, TITLE = 16;
 
 function area(paper, orient) { const [a, b] = PAPER[paper]; const [w, h] = orient === "pysty" ? [b, a] : [a, b]; return { pw: w, ph: h, w: w - 2 * MARGIN, h: h - 2 * MARGIN - TITLE }; }
+// Tulostettava lähde: ext(scale) = piirustuksen rajat (mm), body(u) = SVG-sisältö
+export const planSource = (data, S) => ({ ext: scale => extent(data, scale), body: u => renderPlan(data, S, { u }) });
 function extent(data, scale) {
   const b = planBBox(data); if (!b) return null;
   // tekstien leveys paperilla (fontti 0,25 mm × koko)
@@ -23,7 +25,7 @@ function extent(data, scale) {
   const pad = 14 * scale; // tilaa kokonaismitoille paperilla
   return { x: b.x1 - pad, y: b.y1 - pad, w: b.x2 - b.x1 + 2 * pad, h: b.y2 - b.y1 + 2 * pad };
 }
-function fits(data, scale, paper, orient) { const e = extent(data, scale), A = area(paper, orient); return e && e.w / scale <= A.w && e.h / scale <= A.h; }
+function fits(src, scale, paper, orient) { const e = src.ext(scale), A = area(paper, orient); return e && e.w / scale <= A.w && e.h / scale <= A.h; }
 export function bestFit(data) {
   // Ensisijaisesti A4 (kotitulostin) mittakaavassa 1:20…1:100, sitten A3
   for (const p of ["A4", "A3"]) for (const s of SCALES.filter(s => s >= 20 && s <= 100)) for (const o of ["vaaka", "pysty"]) if (fits(data, s, p, o)) return { scale: s, paper: p, orient: o };
@@ -32,10 +34,10 @@ export function bestFit(data) {
 }
 
 // SVG millimetreinä paperilla
-export function planSvg(data, S, scale) {
-  const e = extent(data, scale); if (!e) return null;
+export function planSvg(src, scale) {
+  const e = src.ext(scale); if (!e) return null;
   const u = .25 * scale;
-  const body = renderPlan(data, S, { u });
+  const body = src.body(u);
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" class="plan-svg" width="${(e.w / scale).toFixed(2)}mm" height="${(e.h / scale).toFixed(2)}mm" viewBox="${e.x} ${e.y} ${e.w} ${e.h}">${body}</svg>`, wmm: e.w / scale, hmm: e.h / scale };
 }
 function scaleBar(scale) {
@@ -46,8 +48,8 @@ function scaleBar(scale) {
   s += `<text x="0" y="6" font-size="2.6">0</text><text x="${L}" y="6" font-size="2.6" text-anchor="middle">${String(n).replace(".", ",")} m</text></svg>`;
   return s;
 }
-function printDoc(data, S, scale, paper, orient, proj, plan) {
-  const r = planSvg(data, S, scale), A = area(paper, orient);
+function printDoc(src, scale, paper, orient, proj, plan) {
+  const r = planSvg(src, scale), A = area(paper, orient);
   const d = new Date();
   return `<!doctype html><html lang="fi"><head><meta charset="utf-8"><title>${esc(proj)} – ${esc(plan)}</title><style>
     @page { size: ${paper} ${orient === "pysty" ? "portrait" : "landscape"}; margin: ${MARGIN}mm; }
@@ -61,8 +63,9 @@ function printDoc(data, S, scale, paper, orient, proj, plan) {
   <div class="tb"><div><b>${esc(proj)}</b><small>${esc(plan)}</small></div><div class="sp"></div><div>${scaleBar(scale)}</div><div><b>1:${scale}</b><small>${paper} ${orient}</small></div><div><small>Mitat millimetreinä</small><small>${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}</small></div></div></div></body></html>`;
 }
 
-export function openPrint(data, S, proj, plan) {
-  if (!planBBox(data)) { toast("Piirustus on tyhjä", true); return; }
+export function openPrint(src, proj, plan) {
+  const data = src;
+  if (!src.ext(50)) { toast("Piirustus on tyhjä", true); return; }
   const st = bestFit(data);
   const html = `<div class="print-opts">
       <label class="fld"><span>Mittakaava</span><select id="p-scale">${SCALES.map(s => `<option value="${s}" ${s === st.scale ? "selected" : ""}>1:${s}</option>`).join("")}</select></label>
@@ -76,7 +79,7 @@ export function openPrint(data, S, proj, plan) {
   const { el } = openSheet("Tulosta", html, { wide: true });
   const v = () => ({ scale: Number(el.querySelector("#p-scale").value), paper: el.querySelector("#p-paper").value, orient: el.querySelector("#p-orient").value });
   const upd = () => {
-    const { scale, paper, orient } = v(), A = area(paper, orient), r = planSvg(data, S, scale), ok = fits(data, scale, paper, orient);
+    const { scale, paper, orient } = v(), A = area(paper, orient), r = planSvg(src, scale), ok = fits(src, scale, paper, orient);
     el.querySelector("#p-msg").innerHTML = ok ? `Piirustus ${Math.round(r.wmm)} × ${Math.round(r.hmm)} mm, mahtuu paperille.` : `<span class="bad">⚠ Ei mahdu: piirustus ${Math.round(r.wmm)} × ${Math.round(r.hmm)} mm, tilaa ${A.w} × ${A.h} mm. Valitse pienempi mittakaava (suurempi luku) tai isompi paperi.</span>`;
     const k = 300 / A.pw;
     el.querySelector("#p-prev").innerHTML = `<div class="pp-paper" style="width:${A.pw * k}px;height:${A.ph * k}px;padding:${MARGIN * k}px"><div class="pp-draw" style="height:${A.h * k}px">${r.svg.replace(/width="[^"]+mm" height="[^"]+mm"/, `width="${r.wmm * k}" height="${r.hmm * k}"`)}</div><div class="pp-tb" style="height:${TITLE * k}px"></div></div>`;
@@ -91,13 +94,13 @@ export function openPrint(data, S, proj, plan) {
     f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
     document.body.appendChild(f);
     f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { console.warn(e); } };
-    f.srcdoc = printDoc(data, S, scale, paper, orient, proj, plan);
+    f.srcdoc = printDoc(src, scale, paper, orient, proj, plan);
   };
   const fname = ext => `${(proj + " " + plan).trim().replace(/[^\wåäöÅÄÖ -]+/g, "").replace(/\s+/g, "_") || "piirustus"}_1-${v().scale}.${ext}`;
   const download = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
-  el.querySelector("#p-svg").onclick = () => { const r = planSvg(data, S, v().scale); download(new Blob([r.svg], { type: "image/svg+xml" }), fname("svg")); };
+  el.querySelector("#p-svg").onclick = () => { const r = planSvg(src, v().scale); download(new Blob([r.svg], { type: "image/svg+xml" }), fname("svg")); };
   el.querySelector("#p-png").onclick = () => {
-    const r = planSvg(data, S, v().scale), dpi = 200, W = Math.round(r.wmm / 25.4 * dpi), H = Math.round(r.hmm / 25.4 * dpi);
+    const r = planSvg(src, v().scale), dpi = 200, W = Math.round(r.wmm / 25.4 * dpi), H = Math.round(r.hmm / 25.4 * dpi);
     const img = new Image();
     img.onload = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H); c.toBlob(b => download(b, fname("png")), "image/png"); };
     img.onerror = () => toast("PNG-vienti epäonnistui", true);

@@ -5,14 +5,18 @@ import { uid, wlen, wallDir, project, joints, wallPoly, visLen, polyArea, isRect
 import { renderPlan, dimLine, openingGeom, settingsOf, dataOf, LAYERS, DEFAULT_SETTINGS, readable } from "./render.js";
 import { KINDS, CATS, GROUPS, OPENINGS, ROOM_NAMES, STATUS, drawItem } from "./catalog.js";
 import { openQuantities } from "./quantities.js";
-import { openPrint } from "./print.js";
+import { openPrint, planSource } from "./print.js";
+import { openViewsSheet } from "./views.js";
 import { H3D } from "./view3d.js";
-import { WALL_MATS, FLOOR_MATS, DOOR_MATS, FRAME_MATS, ITEM_MATS, opts as matOpts } from "./materials.js";
+import { LAYER_KINDS, typeT, typeOf, wallLayers } from "./walltypes.js";
+import { ROOF_TYPES, defaultRoof, ratio, roofGeom } from "./roof.js";
+import { wallsBBox } from "./geom.js";
+import { WALL_MATS, FLOOR_MATS, DOOR_MATS, FRAME_MATS, ITEM_MATS, ROOF_MATS, opts as matOpts } from "./materials.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const num = v => { const n = parseFloat(String(v ?? "").replace(/\s/g, "").replace(",", ".")); return isFinite(n) ? n : NaN; };
 const f2 = v => Math.round(v * 100) / 100;
-const ARR = { wall: "walls", opening: "openings", item: "items", room: "rooms", dim: "dims", text: "texts" };
+const ARR = { wall: "walls", opening: "openings", item: "items", room: "rooms", dim: "dims", text: "texts", roof: "roofs" };
 
 export const TOOLS = [
   ["select", "Valitse", "V", '<path d="M5 3l13 8-6 1.5L9 19z"/>'],
@@ -56,7 +60,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     data: structuredClone(dataOf(plan)), S: settingsOf(plan), ro: readOnly,
     zoom: .1, px: 0, py: 0, tool: readOnly ? "pan" : "select", sel: [], hist: [], fut: [],
     cur: { x: 0, y: 0 }, snapPt: null, guides: [], chain: null, lenBuf: "", drag: null,
-    kind: { kaluste: "sanky", sahko: "pistorasia", lvi: "lattiakaivo" }, group: "sauna", search: "", placeRot: 0,
+    kind: { kaluste: "sanky", sahko: "pistorasia", lvi: "lattiakaivo" }, group: "sauna", search: "", keep: "B", placeRot: 0,
     op: { kind: "ovi", ...structuredClone(OPENINGS) }, roomWalls: true,
     dimDraft: null, measure: null, roomDraft: null, preview: null, pointers: new Map(), pinch: null,
     saveTimer: null, saveState: "saved", lastSaved: JSON.stringify([plan.data || {}, plan.settings || {}]), space: false, clip: null
@@ -72,6 +76,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       ${readOnly ? "" : `<button class="ed-btn" data-a="undo" title="Kumoa (Ctrl+Z)">${svgI(ICON.undo)}</button><button class="ed-btn" data-a="redo" title="Tee uudelleen (Ctrl+Y)">${svgI(ICON.redo)}</button><span class="ed-div"></span>`}
       ${readOnly ? `<button class="ed-btn ed-measure" data-a="measure" title="Mittaa kahden pisteen väli">${svgI(TOOLS.find(t => t[0] === "measure")[3])}<span>Mittaa</span></button><button class="ed-btn" data-a="layers" title="Tasot">${svgI(ICON.layers)}</button>` : ""}
       <button class="ed-btn wide ed-3dbtn" data-a="3d" title="3D-näkymä">${svgI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>')}<span>3D</span></button>
+      <button class="ed-btn wide" data-a="views" title="Julkisivut ja leikkaus">${svgI('<path d="M3 21h18"/><path d="M5 21V10l7-6 7 6v11"/><path d="M9 21v-6h6v6"/>')}<span>Julkisivut</span></button>
       <button class="ed-btn" data-a="fit" title="Sovita näkymään (F)">${svgI(ICON.fit)}</button>
       <button class="ed-btn wide" data-a="qty" title="Määrät ja materiaalit">${svgI(ICON.list)}<span>Määrät</span></button>
       ${readOnly ? "" : `<button class="ed-btn wide" data-a="print" title="Tulosta mittakaavassa">${svgI(ICON.print)}<span>Tulosta</span></button>`}
@@ -384,6 +389,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
   const inp = (k, label, v, extra = "") => `<label class="pf"><span>${label}</span><input data-k="${k}" value="${esc(v ?? "")}" inputmode="decimal" ${extra}></label>`;
   const txt = (k, label, v, list) => `<label class="pf"><span>${label}</span><input data-k="${k}" value="${esc(v ?? "")}" ${list ? `list="pl-${k}"` : ""}>${list ? `<datalist id="pl-${k}">${list.map(x => `<option value="${esc(x)}">`).join("")}</datalist>` : ""}</label>`;
   const sel = (k, label, v, opts) => `<label class="pf"><span>${label}</span><select data-k="${k}">${opts.map(([a, b]) => `<option value="${esc(a)}" ${String(a) === String(v) ? "selected" : ""}>${esc(b)}</option>`).join("")}</select></label>`;
+  const typeSel = (k, cur) => sel(k, "Seinätyyppi", cur, [...(cur === "__" ? [["__", "– valitse tyyppi kaikille –"]] : []), ["", "Ei tyyppiä (oma paksuus)"], ...(E.S.wallTypes || []).map(t => [t.id, `${t.name} (${typeT(t)} mm)`])]);
   // Materiaalivalinta + oma väri (tyhjä väri = materiaalin oma)
   const matRow = (km, kc, label, M, cur, col) => { const def = (M[cur] || Object.values(M)[0]); return `<div class="pmat">${sel(km, label, cur || Object.keys(M)[0], matOpts(M))}${def[1] ? `<label class="pf pcol"><span>Väri</span><input type="color" data-k="${kc}" value="${esc(col || def[1])}"></label>` : ""}</div>`; };
   const chk = (k, label, v) => `<label class="pc"><input type="checkbox" data-k="${k}" ${v ? "checked" : ""}><span>${label}</span></label>`;
@@ -429,13 +435,15 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         ${inp("op.w", "Leveys (mm)", o.w)}${inp("op.h", "Korkeus (mm)", o.h)}${E.op.kind === "ikkuna" ? inp("op.sill", "Alareunan korkeus lattiasta (mm)", o.sill) : ""}
         <p class="pn">Ovien yleiset karmimitat: 7×19 = 700×1900 (sauna), 8×21, 9×21 = 900×2100, 10×21 (ulko-ovi).</p>`;
     }
-    if (t === "wall") return H("Uusi seinä") + inp("s.wallT", "Paksuus (mm)", S.wallT) + inp("s.wallH", "Korkeus (mm)", S.wallH) + sel("s.newStatus", "Tila", S.newStatus, STATUS) +
+    if (t === "wall") return H("Uusi seinä") + typeSel("s.wallType", S.wallType) + (typeOf(S, S.wallType) ? ro_("Paksuus", typeT(typeOf(S, S.wallType)) + " mm") : inp("s.wallT", "Paksuus (mm)", S.wallT)) + inp("s.wallH", "Korkeus (mm)", S.wallH) + sel("s.newStatus", "Tila", S.newStatus, STATUS) +
       `<p class="pn">Seinän pituus mitataan keskilinjasta. Nurkissa seinät liittyvät automaattisesti, ja seinän viereen näytetään sen ulkopinnan pituus.</p>`;
     if (t === "terrace") return H("Terassi") + `<p class="pn">Terassi on alue, jolle ei tule seiniä. Vedä se rakennuksen viereen – alue kohdistuu seinien ulkonurkkiin. Laudoituksen suunnan ja laudan leveyden voi muuttaa valitsemalla terassin. Kaiteet, portaat ja ulkokalusteet löytyvät Kalusteet → Ulko ja terassi.</p>`;
     if (t === "room") return H("Huone") + chk("roomWalls", "Luo seinät ympärille", E.roomWalls) + inp("s.wallT", "Seinän paksuus (mm)", S.wallT) + sel("s.newStatus", "Seinien tila", S.newStatus, STATUS) +
       `<p class="pn">Huone piirretään sisämitoin. Seinät tulevat sisämitan ulkopuolelle.</p>`;
     if (t === "dim" || t === "text" || t === "measure") return H(TOOLS.find(x => x[0] === t)[1]) + `<p class="pn">${HINTS[t]}</p>`;
 
+    if (E.sel.length > 1 && E.sel.every(id => find(id)?.t === "wall")) return H(`${E.sel.length} seinää valittu`) + typeSel("w.typeAll", "__") + sel("keepMode", "Kun paksuus muuttuu, paikallaan pysyy", E.keep, [["B", "Pinta B (yleensä ulkopinta)"], ["A", "Pinta A (yleensä sisäpinta)"], ["C", "Keskilinja"]]) +
+      `<p class="pn">Myötäpäivään piirretyissä seinissä (myös Huone-työkalu) puoli B on ulkopuoli. Esim. kontin sisäeristys: valitse kaikki seinät, tyyppi "Kontin seinä + sisäeristys" ja pidä ulkopinta paikallaan.</p><div class="pbtns">${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
     if (E.sel.length > 1) return H(`${E.sel.length} kohdetta valittu`) + `<div class="pbtns">${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div><p class="pn">Siirrä vetämällä tai nuolinäppäimillä (Shift = 10× ruudukko).</p>`;
     if (E.sel.length === 1) {
       const F = find(E.sel[0]); if (!F) return "";
@@ -444,7 +452,13 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         const jj = j[o.id], L = wlen(o), ang = Math.round(((Math.atan2(o.y2 - o.y1, o.x2 - o.x1) * 180 / Math.PI) + 360) % 360 * 10) / 10;
         const ops = E.data.openings.filter(x => x.wallId === o.id);
         const area = (L + jj.l1 + jj.l2) * (o.h || S.wallH) - ops.reduce((s, x) => s + x.w * x.h, 0);
-        return H("Seinä") + inp("w.vis", "Pituus (näkyvä, mm)", mm(visLen(o, jj))) + inp("w.len", "Pituus keskilinjasta (mm)", mm(L)) + inp("w.t", "Paksuus (mm)", o.t) + inp("w.h", "Korkeus (mm)", o.h ?? S.wallH, `placeholder="${S.wallH}"`) +
+        const ls = wallLayers(o, S), { nx: wnx, ny: wny } = wallDir(o);
+        return H("Seinä") + inp("w.vis", "Pituus (näkyvä, mm)", mm(visLen(o, jj))) + inp("w.len", "Pituus keskilinjasta (mm)", mm(L)) +
+          typeSel("w.type", o.type || "") + (ls ? ro_("Paksuus (kerroksista)", o.t + " mm") +
+            `<div class="layers"><div class="ly-side">Puoli B – ${dirName(-wnx, -wny)}</div>${ls.map(l => `<div class="ly-row"><i style="background:${(LAYER_KINDS[l.kind] || LAYER_KINDS.muu)[1]}"></i><span>${esc(l.name)}</span><b>${l.t}</b></div>`).join("")}<div class="ly-side">Puoli A – ${dirName(wnx, wny)}</div></div>` +
+            sel("keepMode", "Kun paksuus muuttuu, paikallaan pysyy", E.keep, [["B", `Pinta B (${dirName(-wnx, -wny)})`], ["A", `Pinta A (${dirName(wnx, wny)})`], ["C", "Keskilinja"]]) +
+            `<div class="pbtns">${btn("lflip", "Käännä kerrokset")}${btn("wtypes", "Muokkaa seinätyyppejä")}</div>`
+            : inp("w.t", "Paksuus (mm)", o.t)) + inp("w.h", "Korkeus (mm)", o.h ?? S.wallH, `placeholder="${S.wallH}"`) +
           sel("w.status", "Tila", o.status || "new", STATUS) + inp("w.ang", "Suunta (°)", ang) +
           wallGaps(o, j).map(g => inp("w.gap" + g.side, `Väli seinään ${dirName(g.nx, g.ny)} (mm)`, mm(g.dist))).join("") +
           (() => { const { nx, ny } = wallDir(o); const pl = d => d.endsWith("puolella") ? `Pinta ${d}` : `Pinta ${d} puolella`; return H("3D-ulkoasu") + matRow("w.matA", "w.colA", pl(dirName(nx, ny)), WALL_MATS, o.matA, o.colA) + matRow("w.matB", "w.colB", pl(dirName(-nx, -ny)), WALL_MATS, o.matB, o.colB); })() +
@@ -472,6 +486,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           (K.cat === "kaluste" ? matRow("i.mat", "i.col", "3D-materiaali", ITEM_MATS, o.mat || "oletus", o.col) : "") +
           (K.hot ? H("Suojaetäisyydet") + `<p class="pn">Katso arvot kiukaan/tulisijan asennusohjeesta. Alue näkyy punaisena katkoviivana.</p><div class="pf2">${inp("i.sf", "Eteen", o.safe?.f || 0)}${inp("i.ss", "Sivuille", o.safe?.s || 0)}</div>${inp("i.sb", "Taakse", o.safe?.b || 0)}` : "") +
           txt("i.note", "Huomio", o.note || "") +
+          (() => { const sp = spanAlong(o, itemAxis(o)); return sp ? ro_("Tilaa seinien välissä", `${mm(sp.span)} mm`) + `<div class="pbtns">${btn("icenter", "Keskitä seinien väliin")}${btn("ifill", "Seinästä seinään")}</div>` : ""; })() +
           `<div class="pbtns">${btn("rot90", "Käännä 90°")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
       }
       if (ty === "room" && o.kind === "terrace") {
@@ -489,13 +504,27 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           (rect ? `<div class="pf2">${inp("r.w", "Leveys", mm(b.x2 - b.x1))}${inp("r.h", "Syvyys", mm(b.y2 - b.y1))}</div>` : ro_("Kulmia", o.pts.length)) +
           inp("r.ch", "Huonekorkeus (mm)", o.ch ?? "", `placeholder="${S.wallH}"`) + txt("r.floor", "Lattia / pintamateriaali", o.floor || "") +
           matRow("r.fmat", "r.fcol", "3D-lattia", FLOOR_MATS, o.fmat || "puu", o.fcol) +
+          matRow("r.cmat", "r.ccol", "3D-sisäkatto", WALL_MATS, o.cmat || "maali", o.ccol) +
           `<div class="pbtns">${btn("walls", "Luo seinät ympärille")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div><p class="pn">Kulmia voi siirtää vetämällä neliökahvoista.</p>`;
+      }
+      if (ty === "roof") {
+        const Gq = roofGeom(o), tops = o.type !== "tasa";
+        return H("Katto") + sel("f.type", "Kattotyyppi", o.type, ROOF_TYPES) +
+          (tops ? `<div class="pf2">${inp("f.pitch", "Kaltevuus (°)", o.pitch)}${ro_("Suhde", ratio(o.pitch))}</div>` : "") +
+          (o.type === "harja" || o.type === "pulpetti" ? sel("f.dir", o.type === "harja" ? "Harjan suunta" : "Ylä- ja alareunan suunta", o.dir || "x", [["x", "Vaakaan (piirustuksessa)"], ["y", "Pystyyn (piirustuksessa)"]]) : "") +
+          (o.type === "pulpetti" ? sel("f.low", "Matala reuna", o.low || "a", (o.dir || "x") === "x" ? [["a", "Yläreuna (piirustuksessa)"], ["b", "Alareuna"]] : [["a", "Vasen reuna"], ["b", "Oikea reuna"]]) : "") +
+          `<div class="pf2">${inp("f.eave", "Räystäs (mm)", o.eave ?? 500)}${o.type === "auma" ? "" : inp("f.gable", "Päätyräystäs (mm)", o.gable ?? 300)}</div>` +
+          `<div class="pf2">${inp("f.base", "Alapinta seinälinjalla (mm)", o.base ?? S.wallH)}${inp("f.t", "Rakennepaksuus (mm)", o.t ?? 250)}</div>` +
+          ro_("Korkein kohta maasta", `${mm(Gq.top)} mm`) +
+          H("Kattoalue (ulkoseinien mukaan)") + `<div class="pf2">${inp("f.x1", "Vasen X", mm(o.x1))}${inp("f.y1", "Ylä Y", mm(o.y1))}</div><div class="pf2">${inp("f.w", "Leveys", mm(o.x2 - o.x1))}${inp("f.d", "Syvyys", mm(o.y2 - o.y1))}</div>` +
+          H("3D-ulkoasu") + matRow("f.mat", "f.col", "Katemateriaali", ROOF_MATS, o.mat || "pelti", o.col) +
+          `<div class="pbtns">${btn("rfit", "Sovita ulkoseiniin")}${btn("del", "Poista", "danger ghost")}</div>`;
       }
       if (ty === "dim") return H("Mitta") + ro_("Pituus", `${mm(Math.hypot(o.x2 - o.x1, o.y2 - o.y1))} mm`) + inp("d.off", "Etäisyys mitattavasta", mm(o.off || 0)) + txt("d.label", "Oma teksti (tyhjä = pituus)", o.label || "") + `<div class="pbtns">${btn("del", "Poista", "danger ghost")}</div>`;
       if (ty === "text") return H("Teksti") + `<label class="pf"><span>Teksti</span><textarea data-k="t.text" rows="3">${esc(o.text)}</textarea></label>` + inp("t.size", "Koko", o.size || 12) + chk("t.bold", "Lihavoitu", o.bold) + `<div class="pbtns">${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
     }
     // Ei valintaa: piirustuksen asetukset
-    return H("Piirustus") + sel("s.grid", "Ruudukko ja kohdistus", S.grid, [[0, "Ei kohdistusta"], [10, "10 mm"], [50, "50 mm"], [100, "100 mm"], [500, "500 mm"]]) +
+    return H("Piirustus") + `<div class="pbtns">${btn("wtypes", "Seinätyypit ja rakennekerrokset")}${btn("addroof", "+ Katto")}${btn("views", "Julkisivut ja leikkaus")}</div>` + sel("s.grid", "Ruudukko ja kohdistus", S.grid, [[0, "Ei kohdistusta"], [10, "10 mm"], [50, "50 mm"], [100, "100 mm"], [500, "500 mm"]]) +
       inp("s.wallH", "Seinien oletuskorkeus (mm)", S.wallH) + inp("s.wallT", "Seinän oletuspaksuus (mm)", S.wallT) +
       H("Näytä") + chk("s.showWallDims", "Seinien pituudet", S.showWallDims) + chk("s.showOverall", "Kokonaismitat", S.showOverall) + chk("s.showRoomInfo", "Tilojen pinta-alat ja mitat", S.showRoomInfo) + chk("s.showOpeningLabels", "Ovien ja ikkunoiden koot", S.showOpeningLabels) + chk("s.showHeights", "Sähkörasioiden korkeudet", S.showHeights) +
       H("Tasot") + LAYERS.map(([k, l]) => chk("L." + k, l, S.layers[k])).join("") +
@@ -521,6 +550,9 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     const v = el.type === "checkbox" ? el.checked : el.value, n = num(v);
     const [g, key] = k.split(".");
     if (k === "roomWalls") { E.roomWalls = v; return; }
+    if (k === "keepMode") { E.keep = v; return; }
+    if (k === "s.wallType") { E.S.wallType = v; scheduleSave(); panel(); return; }
+    if (k === "w.typeAll") { if (v === "__") return; const ws = E.sel.map(find).filter(F => F?.t === "wall").map(F => F.o); mutate(() => ws.forEach(w => applyType(w, v, E.keep))); return; }
     if (g === "s") {
       E.S[key] = typeof v === "boolean" ? v : key === "newStatus" ? v : (isFinite(n) ? n : E.S[key]);
       scheduleSave(); draw(); return;
@@ -537,6 +569,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           if (L > 1) moveWallEnd(o, 2, o.x1 + dx * L, o.y1 + dy * L, linksOf(o, 2));
         }
         if (key === "t" && n > 0) o.t = n;
+        if (key === "type") applyType(o, v, E.keep);
         if (key === "matA" || key === "matB") { o[key] = v; delete o["col" + key.slice(3)]; }
         if (key === "colA" || key === "colB") o[key] = v;
         if (key.startsWith("gap") && n >= 0) {
@@ -580,12 +613,24 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         if ((key === "bw" || key === "gap") && n >= 0) o[key] = n;
         if (key === "fmat") { o.fmat = v; delete o.fcol; }
         if (key === "fcol") o.fcol = v;
+        if (key === "cmat") { o.cmat = v; delete o.ccol; }
+        if (key === "ccol") o.ccol = v;
         if (key === "elev") { if (v === "") delete o.elev; else if (isFinite(n)) o.elev = n; }
         if (key === "ch") { if (v === "") delete o.ch; else if (n > 0) o.ch = n; }
         if ((key === "w" || key === "h") && n > 0) {
           const b = bboxPts(o.pts), x2 = key === "w" ? b.x1 + n : b.x2, y2 = key === "h" ? b.y1 + n : b.y2;
           o.pts = [{ x: b.x1, y: b.y1 }, { x: x2, y: b.y1 }, { x: x2, y: y2 }, { x: b.x1, y: y2 }];
         }
+      }
+      if (g === "f") {
+        if (["type", "dir", "low"].includes(key)) o[key] = v;
+        if (["pitch", "eave", "gable", "base", "t"].includes(key) && isFinite(n) && n >= 0) o[key] = key === "pitch" ? Math.min(60, n) : n;
+        if (key === "x1" && isFinite(n)) { const w = o.x2 - o.x1; o.x1 = n; o.x2 = n + w; }
+        if (key === "y1" && isFinite(n)) { const d = o.y2 - o.y1; o.y1 = n; o.y2 = n + d; }
+        if (key === "w" && n > 100) o.x2 = o.x1 + n;
+        if (key === "d" && n > 100) o.y2 = o.y1 + n;
+        if (key === "mat") { o.mat = v; delete o.col; }
+        if (key === "col") o.col = v;
       }
       if (g === "d") { if (key === "off" && isFinite(n)) o.off = n; if (key === "label") o.label = v; }
       if (g === "t") { if (key === "text") o.text = v; if (key === "size" && n > 0) o.size = n; if (key === "bold") o.bold = v; }
@@ -604,6 +649,14 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     if (a === "del") return del();
     if (a === "dup") return duplicate();
     if (a === "rot90") return rotateSel(90);
+    if (a === "wtypes") return wallTypeEditor();
+    if (a === "addroof") {
+      const b = wallsBBox(E.data); if (!b) { toastMsg("Piirrä ensin seinät"); return; }
+      const r = { id: uid(), ...defaultRoof(b, E.S.wallH) };
+      mutate(() => { E.data.roofs = E.data.roofs || []; E.data.roofs.push(r); E.sel = [r.id]; });
+      setTool("select"); return;
+    }
+    if (a === "views") return openViews();
     if (!F) return;
     const o = F.o;
     mutate(() => {
@@ -613,6 +666,11 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         o.x2 = mx; o.y2 = my; E.data.walls.push(nw);
         for (const op of E.data.openings.filter(x => x.wallId === o.id)) if (op.off + op.w / 2 > L / 2) { op.wallId = nw.id; op.off = Math.max(0, op.off - L / 2); }
       }
+      if (a === "lflip") o.flip = !o.flip;
+      if ((a === "icenter" || a === "ifill") && F.t === "item") {
+        const ax = itemAxis(o), sp = spanAlong(o, ax);
+        if (sp) { const s0 = (sp.p - sp.m) / 2; o.x += ax.x * s0; o.y += ax.y * s0; if (a === "ifill") o.w = Math.round(sp.span); }
+      }
       if (a === "flip") {
         const L = wlen(o);
         [o.x1, o.y1, o.x2, o.y2] = [o.x2, o.y2, o.x1, o.y1];
@@ -621,15 +679,29 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       if (a === "oside") o.side = o.side === -1 ? 1 : -1;
       if (a === "ohinge") o.hinge = o.hinge === "b" ? "a" : "b";
       if (a === "ocenter") { const w = W(o.wallId); if (w) { const jj = J()[w.id]; o.off = (visLen(w, jj) - o.w) / 2 - jj.l1; } }
+      if (a === "rfit" && F.t === "roof") { const b = wallsBBox(E.data); if (b) Object.assign(o, { x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 }); }
       if (a === "walls" && F.t === "room") {
         const b = bboxPts(o.pts), t = E.S.wallT;
         for (const w of rectWallsAround(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, t)) E.data.walls.push(w);
       }
     });
   }
+  // Uusi seinä: valittu seinätyyppi määrää paksuuden
+  function newWall(x1, y1, x2, y2) {
+    const ty = typeOf(E.S, E.S.wallType);
+    return { id: uid(), x1, y1, x2, y2, t: ty ? typeT(ty) : E.S.wallT, status: E.S.newStatus || "new", ...(ty ? { type: ty.id } : {}) };
+  }
+  // Seinätyypin vaihto. keep: "B" = puolen B pinta pysyy paikallaan, "A" = puolen A pinta, "C" = keskilinja
+  function applyType(w, typeId, keep = "B") {
+    const ty = typeOf(E.S, typeId), oldT = w.t;
+    if (ty) { w.type = ty.id; w.t = typeT(ty); } else delete w.type;
+    const d = (w.t - oldT) / 2 * (keep === "B" ? 1 : keep === "A" ? -1 : 0);
+    if (d) { const { nx, ny } = wallDir(w); applyMove(captureMove([w.id]), nx * d, ny * d); }
+  }
   function rectWallsAround(x, y, w, h, t) {
+    const ty = typeOf(E.S, E.S.wallType); if (ty) t = typeT(ty);
     const a = x - t / 2, b = y - t / 2, c = x + w + t / 2, d = y + h + t / 2, st = E.S.newStatus || "new";
-    const mk = (x1, y1, x2, y2) => ({ id: uid(), x1, y1, x2, y2, t, status: st });
+    const mk = (x1, y1, x2, y2) => ({ id: uid(), x1, y1, x2, y2, t, status: st, ...(ty ? { type: ty.id } : {}) });
     return [mk(a, b, c, b), mk(c, b, c, d), mk(c, d, a, d), mk(a, d, a, b)];
   }
 
@@ -684,7 +756,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
   function applyMove(M, dx, dy) {
     for (const [id, o0] of M.orig) {
       const F = find(id); if (!F) continue; const o = F.o;
-      if (F.t === "wall" || F.t === "dim") { o.x1 = o0.x1 + dx; o.y1 = o0.y1 + dy; o.x2 = o0.x2 + dx; o.y2 = o0.y2 + dy; }
+      if (F.t === "wall" || F.t === "dim" || F.t === "roof") { o.x1 = o0.x1 + dx; o.y1 = o0.y1 + dy; o.x2 = o0.x2 + dx; o.y2 = o0.y2 + dy; }
       if (F.t === "item" || F.t === "text") { o.x = o0.x + dx; o.y = o0.y + dy; }
       if (F.t === "room") o.pts = o0.pts.map(p => ({ x: p.x + dx, y: p.y + dy }));
       if (F.t === "opening" && !M.s.has(o.wallId)) {
@@ -697,6 +769,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
   }
   function refPoint(F, p) {
     const o = F.o;
+    if (F.t === "roof") return [{ x: o.x1, y: o.y1 }, { x: o.x2, y: o.y1 }, { x: o.x2, y: o.y2 }, { x: o.x1, y: o.y2 }].reduce((b, q) => Math.hypot(q.x - p.x, q.y - p.y) < Math.hypot(b.x - p.x, b.y - p.y) ? q : b);
     if (F.t === "wall" || F.t === "dim") return Math.hypot(o.x1 - p.x, o.y1 - p.y) < Math.hypot(o.x2 - p.x, o.y2 - p.y) ? { x: o.x1, y: o.y1 } : { x: o.x2, y: o.y2 };
     if (F.t === "item" || F.t === "text") return { x: o.x, y: o.y };
     if (F.t === "room") return o.pts.reduce((b, q) => Math.hypot(q.x - p.x, q.y - p.y) < Math.hypot(b.x - p.x, b.y - p.y) ? q : b, o.pts[0]);
@@ -712,27 +785,74 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     off = Math.max(0, Math.min(L - def.w, off));
     return { id: "_prev", kind: E.op.kind, wallId: w.id, off, w: def.w, h: def.h, sill: E.op.kind === "ikkuna" ? def.sill : 0, side: pr.d >= 0 ? 1 : -1, hinge: "a" };
   }
-  function itemAt(p) {
+  function itemAt(p, free) {
     const K = KINDS[E.kind[E.tool]]; if (!K) return null;
     const it = { id: "_prev", kind: K.k, x: p.x, y: p.y, w: K.w, d: K.d, rot: E.placeRot, ...(K.h != null ? { h: K.h } : {}) };
-    if (K.wall) {
-      const nw = nearestWall(p, 500);
+    return placeItem(it, p, new Set(), free);
+  }
+  // Kalusteen sijoitus: seinäkalusteet seinän pintaan, sitten kulmat kiinni muiden kalusteiden ja seinien kulmiin
+  function placeItem(it, p, exclude, free) {
+    const K = KINDS[it.kind];
+    E.snapPt = null;
+    if (K?.wall) {
+      const nw = nearestWall(p, Math.max(500, it.d / 2 + 300)); // syvätkin kalusteet (esim. lauteet) pysyvät seinässä
       if (nw) {
-        const { w, pr } = nw, { nx, ny } = wallDir(w), s = pr.d >= 0 ? 1 : -1;
-        const k = s * (w.t / 2 + K.d / 2);
+        const { w, pr } = nw, { dx, dy, nx, ny } = wallDir(w), s = pr.d >= 0 ? 1 : -1;
+        const k = s * (w.t / 2 + it.d / 2);
         it.x = pr.x + nx * k; it.y = pr.y + ny * k;
         it.rot = Math.round(Math.atan2(-s * nx, s * ny) * 180 / Math.PI * 10) / 10;
         it.rot = ((it.rot % 360) + 360) % 360;
+        if (!free) snapAlongWall(it, exclude, { x: dx, y: dy });
         return it;
       }
     }
-    const q = snapPoint(p); it.x = q.x; it.y = q.y;
+    if (free) { it.x = p.x; it.y = p.y; return it; }
+    const q = snapPoint(p, { exclude }); it.x = q.x; it.y = q.y;
+    cornerSnap(it, exclude, null);
     return it;
+  }
+  // Vapaa tila kalusteen x-akselin suunnassa (keskipisteestä lähimpiin seinäpintoihin molempiin suuntiin)
+  function spanAlong(it, dir) {
+    const j = J(), polys = E.data.walls.map(w => wallPoly(w, j[w.id]));
+    const m = rayHit(it.x, it.y, -dir.x, -dir.y, polys, 0), p = rayHit(it.x, it.y, dir.x, dir.y, polys, 0);
+    return m < 30000 && p < 30000 ? { m, p, span: m + p } : null;
+  }
+  const itemAxis = it => { const a = (it.rot || 0) * Math.PI / 180; return { x: Math.cos(a), y: Math.sin(a) }; };
+  // Seinäkalusteen kohdistus seinää pitkin: päät sivuseiniin, keskelle seinien väliin tai kiinni toiseen kalusteeseen.
+  // Jos kaluste on yhtä leveä kuin seinien väli, se keskitetään aina.
+  function snapAlongWall(it, exclude, dir) {
+    const tol = Math.max(80, 16 / E.zoom), sp = spanAlong(it, dir), cands = [];
+    if (sp) {
+      if (Math.abs(sp.span - it.w) <= 15) { const s0 = (sp.p - sp.m) / 2; it.x += dir.x * s0; it.y += dir.y * s0; E.snapPt = { x: it.x, y: it.y, snapped: true }; return true; }
+      cands.push(-sp.m + it.w / 2, sp.p - it.w / 2, (sp.p - sp.m) / 2);
+    }
+    const before = { x: it.x, y: it.y };
+    if (cornerSnap(it, exclude, dir, false)) cands.push(E._cs.along);
+    let best = null;
+    for (const c of cands) if (Math.abs(c) <= tol && (best === null || Math.abs(c) < Math.abs(best))) best = c;
+    if (best !== null) { it.x = before.x + dir.x * best; it.y = before.y + dir.y * best; E.snapPt = { x: it.x, y: it.y, snapped: true }; return true; }
+    E.snapPt = null; return false;
+  }
+  // Siirtää kalustetta niin, että jokin sen kulma osuu toisen kalusteen tai seinän kulmaan (dir = vain tähän suuntaan)
+  function cornerSnap(it, exclude, dir, apply = true) {
+    const tol = Math.max(60, 14 / E.zoom), cands = [], j = J();
+    for (const o of E.data.items) if (o.id !== it.id && !exclude.has(o.id)) cands.push(...itemCorners(o));
+    for (const w of E.data.walls) for (const [x, y] of wallPoly(w, j[w.id])) cands.push({ x, y });
+    let best = null, bd = tol;
+    for (const c of itemCorners(it)) for (const q of cands) {
+      let ddx = q.x - c.x, ddy = q.y - c.y;
+      if (dir) { const along = ddx * dir.x + ddy * dir.y, perp = Math.abs(ddx * dir.y - ddy * dir.x); if (perp > 3) continue; ddx = dir.x * along; ddy = dir.y * along; }
+      const dd = Math.hypot(ddx, ddy);
+      if (dd < bd) { bd = dd; best = { dx: ddx, dy: ddy, x: q.x, y: q.y }; }
+    }
+    if (best && !apply) { E._cs = { along: dir ? best.dx * dir.x + best.dy * dir.y : 0 }; return true; }
+    if (best) { it.x += best.dx; it.y += best.dy; E.snapPt = { x: best.x, y: best.y, snapped: true }; }
+    return !!best;
   }
 
   function addWall(a, b) {
     if (Math.hypot(b.x - a.x, b.y - a.y) < 5) return;
-    mutate(() => E.data.walls.push({ id: uid(), x1: a.x, y1: a.y, x2: b.x, y2: b.y, t: E.S.wallT, status: E.S.newStatus || "new" }), true);
+    mutate(() => E.data.walls.push(newWall(a.x, a.y, b.x, b.y)), true);
   }
   function wallClick(p) {
     if (!E.chain) { E.chain = [p]; draw(); return; }
@@ -770,6 +890,49 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       ["walls", "Luo seinät ympärille", E.roomWalls, "check"], ["t", "Seinän paksuus (mm)", E.S.wallT]
     ], v => { const w = num(v.w), h = num(v.h); if (!(w > 0 && h > 0)) return false; if (num(v.t) > 0) E.S.wallT = num(v.t); E.roomWalls = v.walls; createRoom(p.x, p.y, w, h, v.name, v.walls); });
   }
+  // Seinätyyppien muokkaus: nimi ja kerrokset (puolelta B puolelle A)
+  function wallTypeEditor() {
+    const draft = structuredClone(E.S.wallTypes || []);
+    const m = document.createElement("div"); m.className = "ed-dlg-wrap";
+    const kinds = Object.entries(LAYER_KINDS);
+    const html = () => `<div class="ed-dlg wt-dlg"><h3>Seinätyypit ja rakennekerrokset</h3>
+      <p class="pn">Kerrokset luetellaan puolelta B puolelle A. Myötäpäivään piirretyissä seinissä B on ulkopuoli. Seinän paksuus lasketaan kerroksista. Kalvon paksuudeksi voi jättää 0.</p>
+      ${draft.map((ty, i) => `<div class="wt" data-i="${i}"><div class="wt-head"><input data-f="name" value="${esc(ty.name)}"><b>${typeT(ty)} mm</b><button class="btn small danger ghost" data-x="deltype">Poista</button></div>
+        <table class="wt-t">${ty.layers.map((l, jx) => `<tr data-l="${jx}"><td><i style="background:${(LAYER_KINDS[l.kind] || LAYER_KINDS.muu)[1]}"></i></td><td><input data-f="lname" value="${esc(l.name)}"></td><td><select data-f="kind">${kinds.map(([k, v]) => `<option value="${k}" ${k === l.kind ? "selected" : ""}>${esc(v[0])}</option>`).join("")}</select></td><td><input data-f="t" class="num" inputmode="decimal" value="${l.t}"></td><td class="wt-b"><button data-x="up" title="Siirrä ylös">↑</button><button data-x="dellayer" title="Poista kerros">×</button></td></tr>`).join("")}</table>
+        <button class="btn small ghost" data-x="addlayer">+ Kerros</button></div>`).join("")}
+      <button class="btn small" data-x="addtype">+ Uusi seinätyyppi</button>
+      <div class="pbtns"><button class="btn small ghost" data-x="cancel">Peruuta</button><button class="btn small primary" data-x="ok">Tallenna</button></div></div>`;
+    const redraw = () => { const sc = m.querySelector(".ed-dlg")?.scrollTop || 0; m.innerHTML = html(); m.querySelector(".ed-dlg").scrollTop = sc; };
+    redraw(); root.querySelector(".ed").appendChild(m);
+    const close = () => { m.remove(); svg.focus(); };
+    m.addEventListener("input", e => {
+      const ti = e.target.closest("[data-i]")?.dataset.i, li = e.target.closest("[data-l]")?.dataset.l, f = e.target.dataset.f; if (ti == null || !f) return;
+      const ty = draft[ti];
+      if (f === "name") ty.name = e.target.value;
+      else if (li != null) { const l = ty.layers[li]; if (f === "lname") l.name = e.target.value; if (f === "kind") { l.kind = e.target.value; redraw(); } if (f === "t") { l.t = Math.max(0, num(e.target.value) || 0); m.querySelector(`[data-i="${ti}"] .wt-head b`).textContent = typeT(ty) + " mm"; } }
+    });
+    m.addEventListener("change", e => { if (e.target.dataset.f === "kind") { const ti = e.target.closest("[data-i]").dataset.i, li = e.target.closest("[data-l]").dataset.l; draft[ti].layers[li].kind = e.target.value; redraw(); } });
+    m.addEventListener("click", e => {
+      const x = e.target.closest("[data-x]")?.dataset.x; if (!x) { if (e.target === m) close(); return; }
+      const ti = e.target.closest("[data-i]")?.dataset.i, li = Number(e.target.closest("[data-l]")?.dataset.l);
+      if (x === "cancel") return close();
+      if (x === "addtype") { draft.push({ id: uid(), name: "Uusi seinätyyppi", layers: [{ name: "Runko + eriste", kind: "runko", t: 100 }] }); redraw(); }
+      if (x === "deltype" && confirm("Poistetaanko seinätyyppi? Seinät säilyttävät paksuutensa.")) { draft.splice(ti, 1); redraw(); }
+      if (x === "addlayer") { draft[ti].layers.push({ name: "Uusi kerros", kind: "muu", t: 10 }); redraw(); }
+      if (x === "dellayer") { draft[ti].layers.splice(li, 1); redraw(); }
+      if (x === "up" && li > 0) { const L = draft[ti].layers; [L[li - 1], L[li]] = [L[li], L[li - 1]]; redraw(); }
+      if (x === "ok") {
+        E.S.wallTypes = draft;
+        mutate(() => { for (const w of E.data.walls) { if (!w.type) continue; const ty = typeOf(E.S, w.type); if (ty) w.t = typeT(ty); else delete w.type; } });
+        scheduleSave(); close();
+      }
+    });
+    m.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
+  }
+  function openViews() {
+    flush();
+    openViewsSheet(structuredClone(E.data), structuredClone(E.S), proj?.name || "", plan.name || "", sec => { E.S.section = sec; scheduleSave(); draw(); });
+  }
   function textDialog(p, o) {
     formSheet(o ? "Muokkaa tekstiä" : "Uusi teksti", [["text", "Teksti", o?.text || "", "area"], ["size", "Koko", o?.size || 12]], v => {
       if (!v.text.trim()) return false;
@@ -796,7 +959,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       const v = {}; for (const [k, , , type] of fields) v[k] = type === "check" ? form.elements[k].checked : form.elements[k].value;
       if (onOk(v) !== false) close();
     };
-    setTimeout(() => form.querySelector("input,textarea")?.focus(), 20);
+    setTimeout(() => { if (!form.contains(document.activeElement)) form.querySelector("input,textarea")?.focus(); }, 20);
   }
 
   function setTool(t) {
@@ -850,7 +1013,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       return;
     }
     if (t === "kaluste" || t === "sahko" || t === "lvi") {
-      const it = itemAt(p); if (!it) return;
+      const it = E.preview?.item ? { ...E.preview.item } : itemAt(p, e.shiftKey); if (!it) return;
       mutate(() => { it.id = uid(); E.data.items.push(it); });
       return;
     }
@@ -878,7 +1041,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       if (e.shiftKey || e.ctrlKey) { E.sel = E.sel.includes(hit.id) ? E.sel.filter(x => x !== hit.id) : [...E.sel, hit.id]; panel(); draw(); return; }
       if (!E.sel.includes(hit.id)) { E.sel = [hit.id]; panel(); }
       const F = find(hit.id);
-      E.drag = { type: "move", start: p, ref: refPoint(F, p), M: captureMove(E.sel), before: snapData(), single: F.t === "opening" && E.sel.length === 1 ? F.o : null, moved: false, sx: e.clientX, sy: e.clientY };
+      E.drag = { type: "move", start: p, ref: refPoint(F, p), M: captureMove(E.sel), before: snapData(), single: F.t === "opening" && E.sel.length === 1 ? F.o : null, item: F.t === "item" && E.sel.length === 1 ? { ...F.o } : null, moved: false, sx: e.clientX, sy: e.clientY };
       draw(); return;
     }
     E.drag = { type: "box", a: p, add: e.shiftKey };
@@ -913,6 +1076,14 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           if (grid() && !e.shiftKey) off = Math.round(off / grid()) * grid();
           o.off = Math.max(0, Math.min(wlen(nw.w) - o.w, off));
         }
+        draw(); return;
+      }
+      if (D.item) {
+        // yksittäinen kaluste: seinäkiinnitys ja kulmat kiinni naapureihin
+        const o = find(D.item.id)?.o; if (!o) return;
+        const it = { ...o, w: D.item.w, d: D.item.d, rot: D.item.rot };
+        placeItem(it, { x: D.item.x + p.x - D.start.x, y: D.item.y + p.y - D.start.y }, D.M.s, e.shiftKey);
+        o.x = it.x; o.y = it.y; o.rot = it.rot;
         draw(); return;
       }
       const raw = { x: D.ref.x + p.x - D.start.x, y: D.ref.y + p.y - D.start.y };
@@ -950,7 +1121,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       } else { E.snapPt = E.cur = snapPoint(p, { from: E.dimDraft?.a, free: e.shiftKey, noGrid: true }); }
     } else if (t === "measure") { E.snapPt = E.cur = snapPoint(p, { from: E.measure?.a && !E.measure.b ? E.measure.a : null, free: e.shiftKey, noGrid: true }); }
     else if (t === "opening") { const o = openingAt(p); E.preview = o ? { opening: o } : null; E.snapPt = null; }
-    else if (t === "kaluste" || t === "sahko" || t === "lvi") { const it = itemAt(p); E.preview = it ? { item: it } : null; E.snapPt = null; }
+    else if (t === "kaluste" || t === "sahko" || t === "lvi") { const it = itemAt(p, e.shiftKey); E.preview = it ? { item: it } : null; }
     else E.snapPt = null;
     draw();
   }
@@ -978,7 +1149,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         const ids = [];
         for (const [t, o] of all()) {
           let ok = false;
-          if (t === "wall" || t === "dim") ok = inside({ x: o.x1, y: o.y1 }) && inside({ x: o.x2, y: o.y2 });
+          if (t === "wall" || t === "dim" || t === "roof") ok = inside({ x: o.x1, y: o.y1 }) && inside({ x: o.x2, y: o.y2 });
           else if (t === "item" || t === "text") ok = inside(o);
           else if (t === "room") ok = o.pts.every(inside);
           else if (t === "opening") { const w = W(o.wallId); if (w) { const g = openingGeom(w, o); ok = inside({ x: g.ax, y: g.ay }) && inside({ x: g.bx, y: g.by }); } }
@@ -1098,10 +1269,11 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     if (a === "zin") zoomAt(1.25);
     if (a === "zout") zoomAt(.8);
     if (a === "qty") openQuantities(E.data, E.S, proj?.name, plan.name);
-    if (a === "print") { flush(); openPrint(E.data, E.S, proj?.name || "", plan.name || ""); }
+    if (a === "print") { flush(); openPrint(planSource(E.data, E.S), proj?.name || "", plan.name || ""); }
     if (a === "measure") { setTool(E.tool === "measure" ? "pan" : "measure"); $("#ed-info").hidden = true; }
     if (a === "infoclose") { $("#ed-info").hidden = true; E.sel = []; draw(); }
     if (a === "layers") layersSheet();
+    if (a === "views") openViews();
     if (a === "3d" && !root.querySelector(".ed-3d")) {
       flush(); $("#ed-info").hidden = true;
       import("./view3d.js").then(m => m.open3D(root.querySelector(".ed-body"), structuredClone(E.data), structuredClone(E.S), { title: (proj?.name || "") + " " + (plan.name || ""), onClose: () => { draw(); svg.focus({ preventScroll: true }); } }));

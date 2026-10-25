@@ -4,20 +4,23 @@
 // =============================================================
 import { joints, wallPoly, wallDir, visLen, polyArea, polyCentroid, isRect, bboxPts, wallsBBox, planBBox, mm, m2, rot } from "./geom.js";
 import { drawItem, KINDS } from "./catalog.js";
+import { DEFAULT_WALL_TYPES, LAYER_KINDS, wallLayers } from "./walltypes.js";
+import { roofGeom, ROOF_TYPES, ratio } from "./roof.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const f = v => Math.round(v * 100) / 100;
 const pts = a => a.map(([x, y]) => `${f(x)},${f(y)}`).join(" ");
 export const readable = deg => { let a = ((deg % 360) + 360) % 360; if (a > 90 && a <= 270) a -= 180; return a; };
 
-export const LAYERS = [["rooms", "Tilat"], ["walls", "Seinät, ovet ja ikkunat"], ["kaluste", "Kalusteet"], ["sahko", "Sähkö"], ["lvi", "LVI"], ["dims", "Mitat"], ["texts", "Tekstit"]];
+export const LAYERS = [["rooms", "Tilat"], ["walls", "Seinät, ovet ja ikkunat"], ["roof", "Katto (räystäät ja harja)"], ["kaluste", "Kalusteet"], ["sahko", "Sähkö"], ["lvi", "LVI"], ["dims", "Mitat"], ["texts", "Tekstit"]];
 export const DEFAULT_SETTINGS = {
   grid: 50, wallT: 150, wallH: 2400, newStatus: "new",
   showWallDims: true, showOverall: true, showRoomInfo: true, showOpeningLabels: true, showHeights: true,
   layers: Object.fromEntries(LAYERS.map(l => [l[0], true]))
 };
-export const settingsOf = p => ({ ...DEFAULT_SETTINGS, ...(p?.settings || {}), layers: { ...DEFAULT_SETTINGS.layers, ...(p?.settings?.layers || {}) } });
-export const emptyData = () => ({ walls: [], openings: [], items: [], rooms: [], dims: [], texts: [] });
+export const settingsOf = p => ({ ...DEFAULT_SETTINGS, ...(p?.settings || {}), layers: { ...DEFAULT_SETTINGS.layers, ...(p?.settings?.layers || {}) },
+  wallTypes: structuredClone(p?.settings?.wallTypes || DEFAULT_WALL_TYPES) });
+export const emptyData = () => ({ walls: [], openings: [], items: [], rooms: [], dims: [], texts: [], roofs: [] });
 export const dataOf = p => ({ ...emptyData(), ...(p?.data || {}) });
 
 // Piirustuksen värit. Editori asettaa muuttujat teeman mukaan, tuloste käyttää vaaleita oletuksia.
@@ -46,6 +49,8 @@ export const PLAN_CSS = `
 .tx{fill:var(--p-ink,#1d232a)} .tx.sel{fill:var(--p-sel,#2d7be0)}
 .ih{fill:var(--p-elec,#c2410c);font-weight:600}
 .hit{fill:none;stroke:transparent;pointer-events:stroke}
+.rf-o{fill:none;stroke:var(--p-muted,#5f6b75)} .rf-r{stroke:var(--p-muted,#5f6b75);stroke-dasharray:14 4 2 4} .rf-h{stroke:var(--p-muted,#5f6b75);stroke-dasharray:6 4}
+.rf-t{fill:var(--p-muted,#5f6b75);font-style:italic} .rf.sel .rf-o,.rf.sel .rf-r,.rf.sel .rf-h{stroke:var(--p-sel,#e8730c)} .rf.sel .rf-t{fill:var(--p-sel,#e8730c)}
 `;
 
 function textAt(x, y, deg, size, txt, cls, bg) {
@@ -157,6 +162,28 @@ export function renderPlan(data, S, opts = {}) {
     for (const w of solid) out += `<polygon class="wo" points="${pts(wallPoly(w, J[w.id]))}"/>`;
     out += `</g>`;
     for (const w of solid) out += `<polygon data-t="wall" data-id="${w.id}" class="wf-${w.status === "existing" ? "existing" : "new"}${sel.has(w.id) ? " sel" : ""}" points="${pts(wallPoly(w, J[w.id]))}"/>`;
+    // Rakennekerrokset, kun seinä on riittävän paksu näytöllä
+    for (const w of solid) {
+      const ls = w.type && wallLayers(w, S); if (!ls || w.t / u < 10) continue;
+      const { dx, dy, nx, ny } = wallDir(w), j = J[w.id], h = w.t / 2;
+      const ax = w.x1 - dx * j.e1, ay = w.y1 - dy * j.e1, bx = w.x2 + dx * j.e2, by = w.y2 + dy * j.e2;
+      let c = -h, g = `<g pointer-events="none">`;
+      for (const l of ls) {
+        const t = Number(l.t) || 0, col = (LAYER_KINDS[l.kind] || LAYER_KINDS.muu)[1];
+        if (t <= 0) { g += `<line x1="${f(ax + nx * c)}" y1="${f(ay + ny * c)}" x2="${f(bx + nx * c)}" y2="${f(by + ny * c)}" stroke="${col}" stroke-width="${f(u * 1.3)}" stroke-dasharray="${f(u * 4)} ${f(u * 2)}"/>`; continue; }
+        const c2 = c + t;
+        g += `<polygon fill="${col}" stroke="#4a4540" stroke-width="${f(u * .5)}" points="${pts([[ax + nx * c, ay + ny * c], [bx + nx * c, by + ny * c], [bx + nx * c2, by + ny * c2], [ax + nx * c2, ay + ny * c2]])}"/>`;
+        if (l.kind === "runko" || l.kind === "eriste") {
+          // eristeen aaltoviiva
+          const L = Math.hypot(bx - ax, by - ay), step = Math.max(t * .8, 6 * u), mid = (c + c2) / 2, amp = t * .32;
+          let d = `M ${f(ax + nx * mid)} ${f(ay + ny * mid)}`;
+          for (let k = step / 2, i = 0; k < L; k += step / 2, i++) { const o = mid + (i % 2 ? amp : -amp); d += ` L ${f(ax + dx * k + nx * o)} ${f(ay + dy * k + ny * o)}`; }
+          g += `<path d="${d}" fill="none" stroke="#b49a4a" stroke-width="${f(u * .6)}"/>`;
+        }
+        c = c2;
+      }
+      out += g + (sel.has(w.id) ? `<polygon fill="none" stroke="var(--p-sel,#e8730c)" stroke-width="${f(u * 2)}" points="${pts(wallPoly(w, j))}"/>` : "") + `</g>`;
+    }
     for (const w of walls.filter(w => w.status === "demolish")) out += `<polygon data-t="wall" data-id="${w.id}" class="wd${sel.has(w.id) ? " sel" : ""}" stroke-width="${f(u * 1.4)}" points="${pts(wallPoly(w, J[w.id]))}"/>`;
     if (opts.hit) for (const w of walls) out += `<line class="hit" data-t="wall" data-id="${w.id}" stroke-width="${f(Math.max(w.t, 12 * u))}" x1="${f(w.x1)}" y1="${f(w.y1)}" x2="${f(w.x2)}" y2="${f(w.y2)}"/>`;
     for (const o of data.openings || []) { const w = wById[o.wallId]; if (w) out += drawOpening(w, o, u, S, sel.has(o.id)); }
@@ -175,6 +202,20 @@ export function renderPlan(data, S, opts = {}) {
       const [ox, oy] = rot(0, it.d / 2 + 8 * u, it.rot || 0);
       out += `<text class="pt ih" pointer-events="none" x="${f(it.x + ox)}" y="${f(it.y + oy)}" font-size="${f(7.5 * u)}" text-anchor="middle" dominant-baseline="central">+${esc(it.h)}</text>`;
     }
+  }
+
+  // Katot: räystäslinjat katkoviivalla, harja ja aumataitteet
+  if (Lr.roof) for (const r of data.roofs || []) {
+    const G = roofGeom(r), sl = sel.has(r.id) ? " sel" : "";
+    const seg = ([a, b], cls) => `<line class="${cls}" x1="${f(a[0])}" y1="${f(a[1])}" x2="${f(b[0])}" y2="${f(b[1])}"/>`;
+    let g = `<g class="rf${sl}" stroke-width="${f(u * 1.1)}">`;
+    for (const fc of G.faces) g += `<polygon class="rf-o" points="${pts(fc.map(p => [p[0], p[1]]))}" stroke-dasharray="${f(u * 7)} ${f(u * 4)}"/>`;
+    for (const l of G.ridges) g += seg(l, "rf-r");
+    for (const l of G.hips) g += seg(l, "rf-h");
+    const o = G.outline, name = (ROOF_TYPES.find(t => t[0] === r.type) || [, "Katto"])[1];
+    g += `<text class="pt rf-t" x="${f((o.x1 + o.x2) / 2)}" y="${f(o.y1 + 14 * u)}" font-size="${f(9 * u)}" text-anchor="middle">${esc(name)}${r.type !== "tasa" ? ` ${r.pitch}° (${ratio(r.pitch)})` : ""}</text>`;
+    if (opts.hit) for (const fc of G.faces) g += `<polygon class="hit" data-t="roof" data-id="${r.id}" stroke-width="${f(10 * u)}" points="${pts(fc.map(p => [p[0], p[1]]))}"/>`;
+    out += g + `</g>`;
   }
 
   // Seinien pituudet
@@ -210,6 +251,17 @@ export function renderPlan(data, S, opts = {}) {
   if (Lr.dims && S.showOverall && wb && walls.length) {
     const off = 34 * u;
     out += `<g pointer-events="none">${dimLine(wb.x1, wb.y1, wb.x2, wb.y1, -off, u)}${dimLine(wb.x1, wb.y2, wb.x1, wb.y1, -off, u)}</g>`;
+  }
+  // Leikkausviiva A–A
+  if (Lr.dims && S.section && S.section.show !== false && wb) {
+    const sc = S.section, ext = 900, flip = sc.flip ? -1 : 1;
+    const [x1, y1, x2, y2] = sc.axis === "y" ? [sc.at, wb.y1 - ext, sc.at, wb.y2 + ext] : [wb.x1 - ext, sc.at, wb.x2 + ext, sc.at];
+    // katselusuunta: x-leikkaus katsoo -y (ylös piirustuksessa), y-leikkaus -x
+    const [vx, vy] = sc.axis === "y" ? [-flip, 0] : [0, -flip];
+    const fs = 11 * u;
+    out += `<g pointer-events="none" class="secl"><line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="var(--p-sel,#e8730c)" stroke-width="${f(u * 1.6)}" stroke-dasharray="${f(u * 16)} ${f(u * 4)} ${f(u * 3)} ${f(u * 4)}"/>`;
+    for (const [px, py] of [[x1, y1], [x2, y2]]) out += `<path d="M ${f(px)} ${f(py)} L ${f(px + vx * 26 * u)} ${f(py + vy * 26 * u)}" stroke="var(--p-sel,#e8730c)" stroke-width="${f(u * 2.4)}" marker-end="none"/><text class="pt" x="${f(px + vx * 40 * u)}" y="${f(py + vy * 40 * u)}" font-size="${f(fs)}" font-weight="800" fill="var(--p-sel,#e8730c)" text-anchor="middle" dominant-baseline="central">A</text>`;
+    out += `</g>`;
   }
   // Omat mitat
   if (Lr.dims) for (const d of data.dims || []) out += dimLine(d.x1, d.y1, d.x2, d.y2, d.off || 0, u, d.label || null, sel.has(d.id) ? "sel" : "", `data-t="dim" data-id="${d.id}"`);

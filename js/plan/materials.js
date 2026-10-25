@@ -46,4 +46,12 @@ export const ITEM_MATS = {
   harmaa: ["Harmaa", "#8c9196", null, 0],
   kivi: ["Kivi", "#8d8a84", "stone", 600]
 };
+export const ROOF_MATS = {
+  pelti: ["Konesaumapelti", "#3b3f44", "seam", 2000],
+  tiilikuvio: ["Tiilikuviopelti", "#6b2a22", "clapH", 1400],
+  huopa: ["Bitumikate / huopa", "#2e2f31", "noise", 1000],
+  tiili: ["Kattotiili", "#9a4a32", "tileRoof", 700],
+  aalto: ["Aaltopelti", "#8c9399", "corr", 560],
+  viherkatto: ["Viherkatto", "#5f7f45", "noise", 1000]
+};
 export const opts = M => Object.entries(M).map(([k, v]) => [k, v[0]]);

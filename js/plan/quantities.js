@@ -3,6 +3,9 @@
 // =============================================================
 import { joints, visLen, wlen, polyArea, wallPoly, itemCorners, pointInPoly, bboxPts, isRect, mm, m2 } from "./geom.js";
 import { KINDS, OPENINGS, STATUS, CATS } from "./catalog.js";
+import { LAYER_KINDS, typeOf, wallLayers } from "./walltypes.js";
+import { roofQty, ROOF_TYPES, ratio } from "./roof.js";
+import { ROOF_MATS } from "./materials.js";
 import { openSheet, esc, toast } from "../core.js";
 
 const fi = (v, d = 1) => Number(v).toLocaleString("fi-FI", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -15,6 +18,18 @@ export function computeQty(data, S) {
     const g = walls[w.status || "new"], h = w.h || S.wallH, vl = visLen(w, J[w.id]);
     g.n++; g.len += wlen(w); g.vis += vl; g.gross += vl * h;
     for (const o of data.openings.filter(o => o.wallId === w.id)) g.open += o.w * Math.min(o.h, h);
+  }
+  // Rakennekerrokset seinätyypeittäin (purettavat eivät mukana)
+  const types = new Map();
+  for (const w of data.walls) {
+    if (!w.type || w.status === "demolish") continue;
+    const ty = typeOf(S, w.type); if (!ty) continue;
+    const h = w.h || S.wallH, vl = visLen(w, J[w.id]);
+    const net = vl * h - data.openings.filter(o => o.wallId === w.id).reduce((a, o) => a + o.w * Math.min(o.h, h), 0);
+    const g = types.get(ty.id) || { name: ty.name, t: 0, len: 0, net: 0, studs: 0, studJm: 0, layers: wallLayers({ type: ty.id }, S).map(l => ({ ...l })) };
+    g.len += vl; g.net += Math.max(0, net); g.t = w.t;
+    const n = Math.ceil(vl / 600) + 1; g.studs += n; g.studJm += n * h / 1000 + 2 * vl / 1000;
+    types.set(ty.id, g);
   }
   const terraces = data.rooms.filter(r => r.kind === "terrace").map(r => {
     const b = bboxPts(r.pts), area = polyArea(r.pts), sp = (r.bw || 117) + (r.gap ?? 6);
@@ -32,7 +47,8 @@ export function computeQty(data, S) {
     const K = KINDS[it.kind]; const nm = K?.name || it.kind;
     return c === "kaluste" ? `${it.label && it.label !== nm ? `${it.label} (${nm})` : nm} ${mm(it.w)} × ${mm(it.d)}` : `${nm}${it.h != null && it.h !== "" ? `, korkeus ${it.h}` : ""}`;
   });
-  return { walls, rooms, terraces, openings, items, checks: checks(data, J) };
+  const roofs = (data.roofs || []).map(r => ({ r, q: roofQty(r), name: (ROOF_TYPES.find(t => t[0] === r.type) || [, "Katto"])[1], mat: (ROOF_MATS[r.mat] || ROOF_MATS.pelti)[0] }));
+  return { walls, roofs, types: [...types.values()], rooms, terraces, openings, items, checks: checks(data, J) };
 }
 
 // Kiukaan ja tulisijojen suojaetäisyydet
@@ -76,6 +92,26 @@ export function openQuantities(data, S, projName = "", planName = "") {
     <h3 class="form-h">Seinät</h3>
     ${wallRows ? `<table class="tbl"><thead><tr><th>Tila</th><th class="r">kpl</th><th class="r">Pituus</th><th class="r">Pinta (1 puoli)</th><th class="r">Ilman aukkoja</th></tr></thead><tbody>${wallRows}</tbody></table>
       <p class="form-note">Pituus keskilinjasta. Pinta-ala = näkyvä pituus × seinän korkeus yhdeltä puolelta.</p>` : `<p class="muted small">Ei seiniä.</p>`}
+    ${Q.types.length ? `<h3 class="form-h">Rakennekerrokset seinätyypeittäin</h3>${Q.types.map(g => `<div class="qt"><b>${esc(g.name)}</b> <span class="muted small">${g.t} mm · ${fi(g.len / 1000, 2)} m · ${fi(g.net / 1e6)} m² (aukot vähennetty)</span>
+      <table class="tbl"><tbody>${g.layers.map(l => { const A = g.net / 1e6, k = l.kind; let extra = "";
+        if (k === "runko") extra = `runko k600 n. ${g.studs} kpl, ${fi(g.studJm, 0)} jm · eriste ${fi(A * 1.05)} m² / ${fi(A * l.t / 1000, 2)} m³`;
+        else if (k === "eriste") extra = `${fi(A * 1.05)} m² / ${fi(A * l.t / 1000, 2)} m³`;
+        else if (k === "levy" || k === "kipsi") extra = `n. ${Math.ceil(A / 3.24 * 1.1)} levyä 1200 × 2700`;
+        else if (k === "kalvo") extra = `${fi(A * 1.15)} m² (limitykset)`;
+        else if (k === "paneeli" || k === "verhous") extra = `${fi(A * 1.1)} m² (+10 %)`;
+        else if (k === "rako") extra = l.t ? `koolaus k600 n. ${fi(A / .6 * 1.1, 0)} jm` : "";
+        else extra = `${fi(A)} m²`;
+        return `<tr><td><i class="qi" style="background:${(LAYER_KINDS[k] || LAYER_KINDS.muu)[1]}"></i>${esc(l.name)}</td><td class="r">${l.t} mm</td><td class="r">${extra}</td></tr>`; }).join("")}</tbody></table></div>`).join("")}
+      <p class="form-note">Arvio: runkotolpat k600 + ala- ja yläjuoksu, levyt 1200 × 2700 + 10 % hukka. Tarkista määrät ennen tilausta.</p>` : ""}
+    ${Q.roofs.length ? `<h3 class="form-h">Katto</h3>${Q.roofs.map(({ r, q, name, mat }) => `<table class="tbl"><tbody>
+      <tr><td><b>${esc(name)}</b>${r.type !== "tasa" ? ` ${r.pitch}° (${ratio(r.pitch)})` : ""}</td><td class="r">${esc(mat)}</td></tr>
+      <tr><td>Katon pinta-ala (kalteva)</td><td class="r">${fi(q.area / 1e6)} m² · katetta + 10 % ${fi(q.area / 1e6 * 1.1)} m²</td></tr>
+      <tr><td>Räystäät</td><td class="r">${fi(q.eave / 1000, 2)} m</td></tr>
+      ${q.rake ? `<tr><td>Päätyräystäät (otsalaudat)</td><td class="r">${fi(q.rake / 1000, 2)} m</td></tr>` : ""}
+      ${q.ridge ? `<tr><td>Harja</td><td class="r">${fi(q.ridge / 1000, 2)} m</td></tr>` : ""}
+      ${q.hip ? `<tr><td>Aumataitteet</td><td class="r">${fi(q.hip / 1000, 2)} m</td></tr>` : ""}
+      ${q.gable ? `<tr><td>Päätykolmiot / korotukset (seinäpinta)</td><td class="r">${fi(q.gable / 1e6)} m²</td></tr>` : ""}
+      <tr><td>Korkein kohta maasta</td><td class="r">${mm(q.top)} mm</td></tr></tbody></table>`).join("")}` : ""}
     <h3 class="form-h">Tilat</h3>
     ${Q.rooms.length ? `<table class="tbl"><thead><tr><th>Tila</th><th class="r">Mitat</th><th class="r">Ala</th><th class="r">Seinäpinta</th></tr></thead><tbody>${Q.rooms.map(r => `<tr><td>${esc(r.name)}${r.floor ? `<br><small class="muted">${esc(r.floor)}</small>` : ""}</td><td class="r">${r.dims}</td><td class="r">${fi(r.area / 1e6)} m²</td><td class="r">${fi(r.per * r.h / 1e6)} m²</td></tr>`).join("")}<tr class="sum"><td>Yhteensä</td><td></td><td class="r">${fi(totFloor / 1e6)} m²</td><td></td></tr></tbody></table>
       <p class="form-note">Tilan seinäpinta = sisäpiiri × huonekorkeus (aukkoja ei vähennetty).</p>` : `<p class="muted small">Ei tiloja. Tilat lisätään Huone-työkalulla.</p>`}
@@ -107,6 +143,8 @@ export function openQuantities(data, S, projName = "", planName = "") {
   el.querySelector("#q-copy").onclick = () => {
     const t = [`${projName} – ${planName}`, "",
       "SEINÄT", ...STATUS.filter(([k]) => Q.walls[k].n).map(([k]) => `${st[k]}: ${Q.walls[k].n} kpl, ${fi(Q.walls[k].len / 1000, 2)} m, ${fi((Q.walls[k].gross - Q.walls[k].open) / 1e6)} m² (1 puoli, ilman aukkoja)`), "",
+      ...(Q.types.length ? ["RAKENNEKERROKSET", ...Q.types.flatMap(g => [`${g.name}: ${fi(g.net / 1e6)} m²`, ...g.layers.map(l => `  ${l.name} ${l.t} mm`)]), ""] : []),
+      ...(Q.roofs.length ? ["KATTO", ...Q.roofs.flatMap(({ q, name, mat }) => [`${name}, ${mat}: ${fi(q.area / 1e6)} m² (+10 % ${fi(q.area / 1e6 * 1.1)} m²)`, `Räystäät ${fi(q.eave / 1000, 2)} m${q.ridge ? `, harja ${fi(q.ridge / 1000, 2)} m` : ""}`]), ""] : []),
       "TILAT", ...Q.rooms.map(r => `${r.name}: ${fi(r.area / 1e6)} m²${r.dims ? ` (${r.dims})` : ""}`), `Yhteensä ${fi(totFloor / 1e6)} m²`, "",
       ...(Q.terraces.length ? ["TERASSIT", ...Q.terraces.map(t => `${t.name}: ${fi(t.area / 1e6)} m², lautaa n. ${Math.ceil(t.jm)} jm`), ""] : []),
       "OVET JA IKKUNAT", ...Q.openings.map(([k, n]) => `${n} × ${k}`), "",

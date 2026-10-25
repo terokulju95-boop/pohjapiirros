@@ -188,7 +188,7 @@ export function openForm({ title, fields, values = {}, onSubmit, onDelete, submi
     finished = true; close();
   };
   m.classList.add("open");
-  setTimeout(() => form.querySelector("input:not([type=hidden]):not([type=radio]),textarea")?.focus(), 30);
+  setTimeout(() => { if (!form.contains(document.activeElement)) form.querySelector("input:not([type=hidden]):not([type=radio]),textarea")?.focus(); }, 30);
 }
 
 export function openSheet(title, html, { wide = false, onClose } = {}) {

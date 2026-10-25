@@ -6,7 +6,8 @@
 // =============================================================
 import { joints, wlen, visLen, polyArea, planBBox, mm, m2 } from "./geom.js";
 import { KINDS, OPENINGS } from "./catalog.js";
-import { WALL_MATS, FLOOR_MATS, DOOR_MATS, FRAME_MATS, ITEM_MATS } from "./materials.js";
+import { WALL_MATS, FLOOR_MATS, DOOR_MATS, FRAME_MATS, ITEM_MATS, ROOF_MATS } from "./materials.js";
+import { roofGeom } from "./roof.js";
 
 const M = .001;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -55,6 +56,8 @@ function patternCanvas(kind) {
     case "noise": for (let i = 0; i < 3000; i++) { const v = 200 + rnd() * 55; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(rnd() * N, rnd() * N, 2, 2); } break;
     case "corr": for (let x = 0; x < N; x++) { const v = 170 + 85 * (.5 + .5 * Math.sin(x / N * Math.PI * 4)); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, 0, 1, N); } break;
     case "planks": for (let i = 0; i < 8; i++) { const o = (i * 97) % N; g.fillStyle = gray(225, 30); g.fillRect(0, i * 32, N, 32); grain(0, i * 32, N, 32, 60); line(0, i * 32, N, i * 32, 2); line(o, i * 32, o, i * 32 + 32, 2); } break;
+    case "seam": g.fillStyle = "#ececec"; g.fillRect(0, 0, N, N); for (let i = 0; i < 4; i++) { const x = i * 64; g.fillStyle = "#ffffff"; g.fillRect(x, 0, 4, N); g.fillStyle = "#9a9a9a"; g.fillRect(x + 4, 0, 3, N); } break;
+    case "tileRoof": for (let r = 0; r < 4; r++) { const gr = g.createLinearGradient(0, r * 64, 0, r * 64 + 64); gr.addColorStop(0, "#9a9a9a"); gr.addColorStop(.3, "#ffffff"); gr.addColorStop(1, "#d0d0d0"); g.fillStyle = gr; g.fillRect(0, r * 64, N, 64); for (let k = 0; k <= 4; k++) { const x = k * 64 + (r % 2 ? 32 : 0); line(x, r * 64, x, r * 64 + 64, 2, "rgba(0,0,0,.3)"); } } break;
     case "planksWide": for (let i = 0; i < 2; i++) { g.fillStyle = gray(225, 30); g.fillRect(i * 128, 0, 128, N); grain(i * 128, 0, 128, N, 200); line(i * 128 + 1, 0, i * 128 + 1, N, 3); } break;
   }
   return c;
@@ -76,7 +79,8 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
     return { close: () => wrap.remove() };
   }
 
-  const st = { cut: false, furn: true, tech: true, person: true, mode: "orbit", keys: new Set(), yaw: 0, pitch: 0 };
+  const hasRoof = (data.roofs || []).length > 0;
+  const st = { cut: false, furn: true, tech: true, person: true, roof: true, lights: false, mode: "orbit", keys: new Set(), yaw: 0, pitch: 0 };
   wrap.innerHTML = `<canvas class="v3-cv"></canvas>
     <div class="v3-bar">
       <button class="btn small primary" data-v="close" title="Takaisin piirustukseen (Esc)">‹ 2D</button>
@@ -84,6 +88,8 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
       <label class="pc"><input type="checkbox" data-v="cut"><span>Leikkaa seinät</span></label>
       <label class="pc"><input type="checkbox" data-v="furn" checked><span>Kalusteet</span></label>
       <label class="pc"><input type="checkbox" data-v="tech" checked><span>Sähkö ja LVI</span></label>
+      <label class="pc"><input type="checkbox" data-v="roof" checked><span>${hasRoof ? "Katto" : "Sisäkatot"}</span></label>
+      <label class="pc"><input type="checkbox" data-v="lights"><span>Valaisimet (ilta)</span></label>
       <label class="pc"><input type="checkbox" data-v="person" checked><span>Ihminen 175 cm</span></label>
       <button class="btn small ghost" data-v="shot" title="Tallenna kuva">📷 Kuva</button>
     </div>
@@ -100,7 +106,8 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
   scene.background = new THREE.Color(dark ? 0x1b232b : 0xdfe8ef);
   const camera = new THREE.PerspectiveCamera(55, 1, .05, 500);
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8170, 1.15));
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x8a8170, 1.15);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffffff, 1.45);
   scene.add(sun, sun.target);
 
@@ -158,8 +165,33 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
     return m;
   }
 
-  let root = null;
+  let root = null, obstacles = [];
+  // Monikulmio 3D-pisteistä (mm, z ylös) → paksu laatta tai seinämä. dir = paksuuden suunta [x,y,z] (mm)
+  function prism(poly, off, topMat, sideMat) {
+    const P = poly.map(p => new THREE.Vector3(p[0] * M, p[2] * M, p[1] * M)), O = new THREE.Vector3(off[0] * M, off[2] * M, off[1] * M);
+    const Q = P.map(p => p.clone().add(O)), pos = [], uv = [], groups = [];
+    // pinnan suuntaiset UV-akselit (vaakasuunta ja kaltevuussuunta), mm
+    const n = new THREE.Vector3().subVectors(P[1], P[0]).cross(new THREE.Vector3().subVectors(P[2], P[0])).normalize();
+    let h = new THREE.Vector3(0, 1, 0).cross(n); if (h.length() < 1e-3) h.set(1, 0, 0); h.normalize();
+    const sv = new THREE.Vector3().crossVectors(n, h).normalize();
+    const tile = topMat.userData?.tile || 1;
+    const tri = (a, b, c, uvOn) => { for (const v of [a, b, c]) { pos.push(v.x, v.y, v.z); uv.push(uvOn ? v.dot(h) / tile : 0, uvOn ? v.dot(sv) / tile : 0); } };
+    let start = 0;
+    for (let i = 1; i < Q.length - 1; i++) tri(Q[0], Q[i], Q[i + 1], true);
+    groups.push([start, pos.length / 3 - start, 0]); start = pos.length / 3;
+    for (let i = 1; i < P.length - 1; i++) tri(P[0], P[i + 1], P[i], true);
+    for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length], c = Q[(i + 1) % P.length], d = Q[i]; tri(a, b, c, false); tri(a, c, d, false); }
+    groups.push([start, pos.length / 3 - start, 1]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    groups.forEach(([s0, c, m]) => geo.addGroup(s0, c, m)); geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, [topMat, sideMat]);
+    [topMat, sideMat].forEach(m => m.side = THREE.DoubleSide);
+    mesh.castShadow = mesh.receiveShadow = true;
+    return mesh;
+  }
   function build() {
+    obstacles = [];
     if (root) { scene.remove(root); root.traverse(o => o.geometry?.dispose?.()); }
     root = new THREE.Group(); scene.add(root);
     const J = joints(data.walls);
@@ -182,7 +214,11 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
       }
       const ops = data.openings.filter(o => o.wallId === w.id).sort((a, b) => a.off - b.off);
       let cur = -j.e1;
-      const seg = (x0, x1, y0, y1) => box(g, x0, x1, y0, y1, -t / 2, t / 2, mats, true, x0);
+      const wdx = (w.x2 - w.x1) / L, wdy = (w.y2 - w.y1) / L;
+      const seg = (x0, x1, y0, y1) => {
+        if (y0 < 1500 && y1 > 300) obstacles.push({ cx: w.x1 + wdx * (x0 + x1) / 2, cy: w.y1 + wdy * (x0 + x1) / 2, dx: wdx, dy: wdy, hl: (x1 - x0) / 2, ht: t / 2 });
+        return box(g, x0, x1, y0, y1, -t / 2, t / 2, mats, true, x0);
+      };
       for (const o of ops) {
         const a = Math.max(cur, o.off), b = Math.min(L + j.e2, o.off + o.w);
         if (a > cur) seg(cur, a, 0, top);
@@ -242,6 +278,52 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
       const xs = r.pts.map(p => p.x), ys = r.pts.map(p => p.y);
       mesh.userData.info = [r.name || (terrace ? "Terassi" : "Tila"), [["Pinta-ala", m2(polyArea(r.pts)) + " m²"], ["Mitat", `${mm(Math.max(...xs) - Math.min(...xs))} × ${mm(Math.max(...ys) - Math.min(...ys))} mm`], ...(!terrace ? [["Huonekorkeus", (r.ch || H) + " mm"]] : [])]];
       root.add(mesh);
+    }
+
+    // ---------- Katot, päätykolmiot ja sisäkatot ----------
+    if (st.roof && !st.cut) {
+      for (const r of data.roofs || []) {
+        const G = roofGeom(r), t = r.t ?? 250, rm = matOf(ROOF_MATS[r.mat] || ROOF_MATS.pelti, r.col), under = plain("#e9e4d8");
+        const rg = new THREE.Group(); rg.userData.info = ["Katto", [["Tyyppi", { harja: "Harjakatto", pulpetti: "Pulpettikatto", auma: "Aumakatto", tasa: "Tasakatto" }[r.type] || r.type], ...(r.type !== "tasa" ? [["Kaltevuus", r.pitch + "°"]] : []), ["Räystäs", (r.eave ?? 500) + " mm"], ["Korkein kohta", mm(G.top) + " mm"]]];
+        for (const f of G.faces) rg.add(prism(f, [0, 0, t / Math.cos(Math.atan(G.k))], rm, under));
+        const cx0 = (r.x1 + r.x2) / 2, cy0 = (r.y1 + r.y2) / 2;
+        for (const gb of G.gables) {
+          const p = gb.pts, c = p.reduce((a, q) => [a[0] + q[0] / p.length, a[1] + q[1] / p.length], [0, 0]);
+          // lähin seinä: sen ulkopinnan materiaali päätykolmioon
+          let best = null, bd = Infinity;
+          for (const w of data.walls) { const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2, d = Math.hypot(mx - c[0], my - c[1]); if (d < bd) { bd = d; best = w; } }
+          const hx = p[1][0] - p[0][0], hy = p[1][1] - p[0][1], hl = Math.hypot(hx, hy) || 1;
+          let nx = -hy / hl, ny = hx / hl; if ((cx0 - c[0]) * nx + (cy0 - c[1]) * ny < 0) { nx = -nx; ny = -ny; }
+          const tw = best?.t || 150;
+          let gm = matOf(WALL_MATS.maali);
+          if (best) { const L2 = wlen(best) || 1, bnx = -(best.y2 - best.y1) / L2, bny = (best.x2 - best.x1) / L2, outA = bnx * nx + bny * ny < 0; gm = matOf(WALL_MATS[outA ? best.matA : best.matB] || WALL_MATS.maali, outA ? best.colA : best.colB); }
+          rg.add(prism(p, [nx * tw, ny * tw, 0], gm, endMat));
+        }
+        root.add(rg);
+      }
+      for (const r of data.rooms) {
+        if (r.kind === "terrace" || !(r.pts?.length > 2)) continue;
+        const cm = matOf(WALL_MATS[r.cmat] || WALL_MATS.maali, r.ccol);
+        const geo = new THREE.ShapeGeometry(new THREE.Shape(r.pts.map(p => new THREE.Vector2(p.x * M, p.y * M))));
+        if (cm.userData.tile) { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / cm.userData.tile, uv.getY(i) / cm.userData.tile); }
+        const mesh = new THREE.Mesh(geo, cm); mesh.rotation.x = Math.PI / 2; mesh.position.y = (r.ch || H) * M - .002; mesh.receiveShadow = true;
+        mesh.userData.info = [`${r.name || "Tila"} – sisäkatto`, [["Huonekorkeus", (r.ch || H) + " mm"]]];
+        root.add(mesh);
+      }
+    }
+
+    // ---------- Valaisimet (iltatila) ----------
+    sun.intensity = st.lights ? .08 : 1.45; hemi.intensity = st.lights ? .16 : 1.15;
+    scene.background.set(st.lights ? 0x10151c : (dark ? 0x1b232b : 0xdfe8ef));
+    if (st.lights) {
+      const lamps = data.items.filter(it => ["kattovalo", "spotti", "seinavalo", "ulkovalo"].includes(it.kind));
+      const spots = lamps.length ? lamps.map(it => ({ x: it.x, y: it.y, z: it.kind === "seinavalo" || it.kind === "ulkovalo" ? (it.h ?? 1800) : H - 120, k: it.kind }))
+        : data.rooms.filter(r => r.kind !== "terrace" && r.pts?.length > 2).map(r => ({ x: r.pts.reduce((a, p) => a + p.x, 0) / r.pts.length, y: r.pts.reduce((a, p) => a + p.y, 0) / r.pts.length, z: (r.ch || H) - 120, k: "kattovalo" }));
+      for (const sp of spots.slice(0, 16)) {
+        const L = new THREE.PointLight(0xffd29a, sp.k === "spotti" ? 1.6 : 3.2, 9, 1.6);
+        L.position.set(sp.x * M, sp.z * M, sp.y * M); root.add(L);
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(.04, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff1d0 })); bulb.position.copy(L.position); root.add(bulb);
+      }
     }
 
     // ---------- Kalusteet, sähkö ja LVI ----------
@@ -452,11 +534,28 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
       if (f || sdir) {
         camera.position.x += (Math.sin(st.yaw) * f - Math.cos(st.yaw) * sdir) * sp;
         camera.position.z += (Math.cos(st.yaw) * f + Math.sin(st.yaw) * sdir) * sp;
+        collide();
         applyLook();
       }
     } else controls.update();
     renderer.render(scene, camera);
     raf = requestAnimationFrame(loop);
+  }
+  // Törmäys seiniin: kameran ympärillä 25 cm:n "keho", joka työnnetään ulos seinästä
+  function collide() {
+    const R = 250;
+    for (let k = 0; k < 3; k++) for (const o of obstacles) {
+      const px = camera.position.x / M - o.cx, py = camera.position.z / M - o.cy;
+      let a = px * o.dx + py * o.dy, b = -px * o.dy + py * o.dx; // a = seinää pitkin, b = seinän normaalin suunnassa
+      const ca = Math.max(-o.hl, Math.min(o.hl, a)), cb = Math.max(-o.ht, Math.min(o.ht, b));
+      const da = a - ca, db = b - cb, d = Math.hypot(da, db);
+      if (d >= R) continue;
+      if (d < 1e-6) { // seinän sisällä: ulos lyhintä reittiä
+        if (o.ht - Math.abs(b) <= o.hl - Math.abs(a)) b = Math.sign(b || 1) * (o.ht + R); else a = Math.sign(a || 1) * (o.hl + R);
+      } else { a = ca + da / d * R; b = cb + db / d * R; }
+      camera.position.x = (o.cx + a * o.dx - b * o.dy) * M;
+      camera.position.z = (o.cy + a * o.dy + b * o.dx) * M;
+    }
   }
   function close() {
     alive = false; cancelAnimationFrame(raf); ro.disconnect();
