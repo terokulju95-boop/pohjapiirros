@@ -7,6 +7,7 @@ import { KINDS, CATS, GROUPS, OPENINGS, ROOM_NAMES, STATUS, drawItem } from "./c
 import { openQuantities } from "./quantities.js";
 import { openPrint } from "./print.js";
 import { H3D } from "./view3d.js";
+import { WALL_MATS, FLOOR_MATS, DOOR_MATS, FRAME_MATS, ITEM_MATS, opts as matOpts } from "./materials.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const num = v => { const n = parseFloat(String(v ?? "").replace(/\s/g, "").replace(",", ".")); return isFinite(n) ? n : NaN; };
@@ -383,6 +384,8 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
   const inp = (k, label, v, extra = "") => `<label class="pf"><span>${label}</span><input data-k="${k}" value="${esc(v ?? "")}" inputmode="decimal" ${extra}></label>`;
   const txt = (k, label, v, list) => `<label class="pf"><span>${label}</span><input data-k="${k}" value="${esc(v ?? "")}" ${list ? `list="pl-${k}"` : ""}>${list ? `<datalist id="pl-${k}">${list.map(x => `<option value="${esc(x)}">`).join("")}</datalist>` : ""}</label>`;
   const sel = (k, label, v, opts) => `<label class="pf"><span>${label}</span><select data-k="${k}">${opts.map(([a, b]) => `<option value="${esc(a)}" ${String(a) === String(v) ? "selected" : ""}>${esc(b)}</option>`).join("")}</select></label>`;
+  // Materiaalivalinta + oma väri (tyhjä väri = materiaalin oma)
+  const matRow = (km, kc, label, M, cur, col) => { const def = (M[cur] || Object.values(M)[0]); return `<div class="pmat">${sel(km, label, cur || Object.keys(M)[0], matOpts(M))}${def[1] ? `<label class="pf pcol"><span>Väri</span><input type="color" data-k="${kc}" value="${esc(col || def[1])}"></label>` : ""}</div>`; };
   const chk = (k, label, v) => `<label class="pc"><input type="checkbox" data-k="${k}" ${v ? "checked" : ""}><span>${label}</span></label>`;
   const ro_ = (label, v) => `<div class="pf ro"><span>${label}</span><b>${v}</b></div>`;
   const btn = (a, label, cls = "") => `<button class="btn small ${cls}" data-pa="${a}">${label}</button>`;
@@ -444,6 +447,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         return H("Seinä") + inp("w.vis", "Pituus (näkyvä, mm)", mm(visLen(o, jj))) + inp("w.len", "Pituus keskilinjasta (mm)", mm(L)) + inp("w.t", "Paksuus (mm)", o.t) + inp("w.h", "Korkeus (mm)", o.h ?? S.wallH, `placeholder="${S.wallH}"`) +
           sel("w.status", "Tila", o.status || "new", STATUS) + inp("w.ang", "Suunta (°)", ang) +
           wallGaps(o, j).map(g => inp("w.gap" + g.side, `Väli seinään ${dirName(g.nx, g.ny)} (mm)`, mm(g.dist))).join("") +
+          (() => { const { nx, ny } = wallDir(o); const pl = d => d.endsWith("puolella") ? `Pinta ${d}` : `Pinta ${d} puolella`; return H("3D-ulkoasu") + matRow("w.matA", "w.colA", pl(dirName(nx, ny)), WALL_MATS, o.matA, o.colA) + matRow("w.matB", "w.colB", pl(dirName(-nx, -ny)), WALL_MATS, o.matB, o.colB); })() +
           ro_("Seinäpinta, yksi puoli", `${m2(Math.max(0, area))} m²`) + (ops.length ? ro_("Aukkoja", ops.length) : "") +
           `<div class="pbtns">${btn("split", "Jaa kahtia")}${btn("flip", "Käännä suunta")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
       }
@@ -453,6 +457,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           inp("o.w", "Leveys (mm)", o.w) + inp("o.h", "Korkeus (mm)", o.h) + (o.kind === "ikkuna" ? inp("o.sill", "Alareuna lattiasta (mm)", o.sill) : "") +
           inp("o.start", "Etäisyys seinän alusta (mm)", mm(start)) + ro_("Etäisyys seinän lopusta", `${mm(vl - start - o.w)} mm`) +
           txt("o.label", "Merkintä (tyhjä = mitat)", o.label || "") +
+          (o.kind === "ikkuna" ? H("3D-ulkoasu") + sel("o.frame", "Karmin väri", o.frame || "valkoinen", matOpts(FRAME_MATS)) : o.kind !== "aukko" ? H("3D-ulkoasu") + sel("o.mat", "Ovilehti", o.mat || "puu", matOpts(DOOR_MATS)) : "") +
           `<div class="pbtns">${o.kind !== "ikkuna" && o.kind !== "aukko" ? btn("oside", "Aukeaa toiselle puolelle") : ""}${o.kind === "ovi" ? btn("ohinge", "Saranat toiseen reunaan") : ""}${btn("ocenter", "Keskitä seinälle")}${btn("del", "Poista", "danger ghost")}</div>`;
       }
       if (ty === "item") {
@@ -461,7 +466,10 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         return H(esc(K.name)) + txt("i.label", "Nimi / merkintä", o.label || "") +
           `<div class="pf2">${inp("i.w", "Leveys", o.w)}${inp("i.d", "Syvyys", o.d)}</div><div class="pf2">${inp("i.x", "X", mm(o.x))}${inp("i.y", "Y", mm(o.y))}</div>` +
           inp("i.rot", "Kulma (°)", o.rot || 0) + (wallTag ? inp("i.h", "Asennuskorkeus lattiasta (mm)", o.h ?? "") : "") +
-          (K.cat === "kaluste" ? `<div class="pf2">${inp("i.zh", "3D-korkeus", o.zh ?? "", `placeholder="${H3D[o.kind]?.[0] ?? 600}"`)}${inp("i.ze", "Alareuna lattiasta", o.ze ?? "", `placeholder="${H3D[o.kind]?.[1] ?? 0}"`)}</div>` : "") +
+          (o.kind === "lauteet" ? H("Lauteet") + `<div class="pf2">${inp("i.lu", "Ylälauteen syvyys", o.lu ?? 600)}${inp("i.hu", "Ylälauteen korkeus", o.hu ?? 1050)}</div><div class="pf2">${inp("i.la", "Alalauteen syvyys", mm(o.d - (o.lu ?? 600)))}${inp("i.ha", "Alalauteen korkeus", o.ha ?? 600)}</div>` +
+            ro_("Ylälaude – katto", `${S.wallH - (o.hu ?? 1050)} mm`) + `<p class="pn">Ylälauteen ja katon väliksi suositellaan yleensä noin 1100–1200 mm. Korkeudet ovat lauteen pinnan korkeuksia lattiasta.</p>`
+            : K.cat === "kaluste" ? `<div class="pf2">${inp("i.zh", "3D-korkeus", o.zh ?? "", `placeholder="${H3D[o.kind]?.[0] ?? 600}"`)}${inp("i.ze", "Alareuna lattiasta", o.ze ?? "", `placeholder="${H3D[o.kind]?.[1] ?? 0}"`)}</div>` : "") +
+          (K.cat === "kaluste" ? matRow("i.mat", "i.col", "3D-materiaali", ITEM_MATS, o.mat || "oletus", o.col) : "") +
           (K.hot ? H("Suojaetäisyydet") + `<p class="pn">Katso arvot kiukaan/tulisijan asennusohjeesta. Alue näkyy punaisena katkoviivana.</p><div class="pf2">${inp("i.sf", "Eteen", o.safe?.f || 0)}${inp("i.ss", "Sivuille", o.safe?.s || 0)}</div>${inp("i.sb", "Taakse", o.safe?.b || 0)}` : "") +
           txt("i.note", "Huomio", o.note || "") +
           `<div class="pbtns">${btn("rot90", "Käännä 90°")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
@@ -480,6 +488,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         return H("Tila") + txt("r.name", "Nimi", o.name, ROOM_NAMES) + ro_("Pinta-ala", `${m2(polyArea(o.pts))} m²`) +
           (rect ? `<div class="pf2">${inp("r.w", "Leveys", mm(b.x2 - b.x1))}${inp("r.h", "Syvyys", mm(b.y2 - b.y1))}</div>` : ro_("Kulmia", o.pts.length)) +
           inp("r.ch", "Huonekorkeus (mm)", o.ch ?? "", `placeholder="${S.wallH}"`) + txt("r.floor", "Lattia / pintamateriaali", o.floor || "") +
+          matRow("r.fmat", "r.fcol", "3D-lattia", FLOOR_MATS, o.fmat || "puu", o.fcol) +
           `<div class="pbtns">${btn("walls", "Luo seinät ympärille")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div><p class="pn">Kulmia voi siirtää vetämällä neliökahvoista.</p>`;
       }
       if (ty === "dim") return H("Mitta") + ro_("Pituus", `${mm(Math.hypot(o.x2 - o.x1, o.y2 - o.y1))} mm`) + inp("d.off", "Etäisyys mitattavasta", mm(o.off || 0)) + txt("d.label", "Oma teksti (tyhjä = pituus)", o.label || "") + `<div class="pbtns">${btn("del", "Poista", "danger ghost")}</div>`;
@@ -528,6 +537,8 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           if (L > 1) moveWallEnd(o, 2, o.x1 + dx * L, o.y1 + dy * L, linksOf(o, 2));
         }
         if (key === "t" && n > 0) o.t = n;
+        if (key === "matA" || key === "matB") { o[key] = v; delete o["col" + key.slice(3)]; }
+        if (key === "colA" || key === "colB") o[key] = v;
         if (key.startsWith("gap") && n >= 0) {
           const g = wallGaps(o, J()).find(x => String(x.side) === key.slice(3));
           if (g) { const d = g.dist - n; applyMove(captureMove([o.id]), g.nx * d, g.ny * d); }
@@ -543,6 +554,8 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         if (key === "sill" && isFinite(n)) o.sill = n;
         if (key === "start" && isFinite(n)) o.off = n - jj.l1;
         if (key === "label") o.label = v;
+        if (key === "mat") o.mat = v;
+        if (key === "frame") o.frame = v;
         if (w) o.off = Math.max(0, Math.min(wlen(w) - o.w, o.off));
       }
       if (g === "i") {
@@ -552,6 +565,11 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         if (key === "h") o.h = v === "" ? null : isFinite(n) ? n : o.h;
         if (key === "label") o.label = v;
         if (key === "note") o.note = v;
+        if (key === "mat") { o.mat = v; delete o.col; }
+        if (key === "col") o.col = v;
+        if (key === "lu" && n >= 100 && n < o.d) o.lu = n;
+        if (key === "la" && n >= 100) o.d = (o.lu ?? 600) + n;
+        if ((key === "hu" || key === "ha") && n >= 0) o[key] = n;
         if (key === "zh" || key === "ze") { if (v === "") delete o[key]; else if (isFinite(n) && n >= 0) o[key] = n; }
         if (["sf", "ss", "sb"].includes(key)) { o.safe = { f: 0, s: 0, b: 0, ...(o.safe || {}) }; o.safe[key[1]] = isFinite(n) ? Math.max(0, n) : 0; }
       }
@@ -560,6 +578,8 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         if (key === "floor") o.floor = v;
         if (key === "dir") o.dir = v;
         if ((key === "bw" || key === "gap") && n >= 0) o[key] = n;
+        if (key === "fmat") { o.fmat = v; delete o.fcol; }
+        if (key === "fcol") o.fcol = v;
         if (key === "elev") { if (v === "") delete o.elev; else if (isFinite(n)) o.elev = n; }
         if (key === "ch") { if (v === "") delete o.ch; else if (n > 0) o.ch = n; }
         if ((key === "w" || key === "h") && n > 0) {

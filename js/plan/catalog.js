@@ -43,6 +43,13 @@ const FURN = [
   ["varaaja", "Lämminvesivaraaja", 550, 550, (w, d) => E(0, 0, w / 2, d / 2) + T(0, 0, Math.min(w, d) * .26, "LVV")],
   ["portaat", "Portaat", 900, 2700, (w, d) => box(w, d) + Array.from({ length: Math.max(1, Math.floor(d / 250) - 1) }, (_, i) => L(-w / 2, -d / 2 + (i + 1) * d / Math.floor(d / 250), w / 2, -d / 2 + (i + 1) * d / Math.floor(d / 250))).join("") + P(`M 0 ${d / 2 - 100} L 0 ${-d / 2 + 150} M -90 ${-d / 2 + 300} L 0 ${-d / 2 + 150} L 90 ${-d / 2 + 300}`)],
   // --- Sauna ---
+  // Lauteet pakettina: takana ylälaude, edessä alalaude. Syvyydet ja korkeudet muokattavissa.
+  ["lauteet", "Lauteet (ylä + ala)", 2000, 1000, (w, d, it) => {
+    const lu = Math.min(d - 100, it?.lu ?? 600), y0 = -d / 2, yb = y0 + lu, fs = Math.max(70, Math.min(lu, d - lu) * .28);
+    const planks = (a, b) => { let s = ""; const n = Math.max(1, Math.round((b - a) / 110)); for (let i = 1; i < n; i++) s += L(-w / 2, a + i * (b - a) / n, w / 2, a + i * (b - a) / n); return s; };
+    return R(-w / 2, y0, w, lu) + planks(y0, yb) + R(-w / 2, yb, w, d - lu) + planks(yb, d / 2) + R(-w / 2, yb - 12, w, 24, "sf") +
+      T(0, (y0 + yb) / 2, fs, `YLÄ +${it?.hu ?? 1050}`) + T(0, (yb + d / 2) / 2, fs * .9, `ALA +${it?.ha ?? 600}`);
+  }, { wall: true }],
   ["puukiuas", "Puukiuas", 450, 600, (w, d) => box(w, d) + R(-w / 2 + 40, -d / 2 + 40, w - 80, d * .55) + [-1, 0, 1].map(a => C(a * w * .22, -d / 2 + 40 + d * .27, Math.min(w, d) * .06, "sf")).join("") + R(-w * .3, d / 2 - d * .3, w * .6, d * .22) + T(0, d * .05, Math.min(w, d) * .16, "PUU"), { hot: true }],
   ["kivilevy", "Kivilevy / suojalevy seinään", 1200, 30, (w, d) => R(-w / 2, -d / 2, w, d, "sh") + L(-w / 2, d / 2 + 25, w / 2, d / 2 + 25, "sl") , { wall: true }],
   ["kiuaskaide", "Kiukaan suojakaide", 700, 40, (w, d) => R(-w / 2, -d / 2, w, d, "sh")],
@@ -135,7 +142,7 @@ function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;
 export const CATS = [["kaluste", "Kalusteet"], ["sahko", "Sähkö"], ["lvi", "LVI"]];
 // Kalusteryhmät. Sama kaluste voi olla useassa ryhmässä.
 export const GROUPS = [
-  ["sauna", "Sauna", ["kiuas", "puukiuas", "kivilevy", "kiuaskaide", "laude", "laudejakkara", "selkanoja", "lattiaritila", "kiulu", "pesupata", "hormi"]],
+  ["sauna", "Sauna", ["lauteet", "kiuas", "puukiuas", "kivilevy", "kiuaskaide", "laude", "laudejakkara", "selkanoja", "lattiaritila", "kiulu", "pesupata", "hormi"]],
   ["pesu", "Pesuhuone ja WC", ["suihku", "suihkuseina", "wc", "kuivakaymala", "pesuallas", "pesuallaskaappi", "peilikaappi", "amme", "pesukone", "kuivauskaappi", "pyyhekuivain", "varaaja"]],
   ["keittio", "Keittiö", ["keittiotaso", "ylakaappi", "tiskiallas", "liesi", "puuliesi", "jaakaappi", "pakastin", "astianpesukone", "mikro", "saareke", "ruokaryhma4", "ruokaryhma6", "poyta", "pyoreapoyta", "tuoli"]],
   ["makuu", "Makuuhuone", ["sanky", "sanky2", "kerrossanky", "vauvansanky", "yopoyta", "lipasto", "kaappi", "hylly"]],

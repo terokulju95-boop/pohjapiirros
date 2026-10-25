@@ -338,3 +338,9 @@ a.pcard:active { transform: scale(.99); }
 .v3-walk button { width: 56px; height: 56px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); font-size: 1.3rem; box-shadow: var(--shadow); touch-action: none; user-select: none; }
 .ed-3dbtn { color: var(--pri); }
 @media (max-width: 899px) { .ed-3dbtn span { display: inline; } .v3-bar .pc span { font-size: .78rem; } }
+
+/* Materiaalivalinnat */
+.pmat { display: grid; grid-template-columns: 1fr 64px; gap: 8px; align-items: end; }
+.pmat .pf { margin-bottom: 8px; }
+.pcol input[type=color] { height: 34px; padding: 2px; cursor: pointer; }
+.v3-info { position: absolute; left: 10px; bottom: 34px; width: min(320px, calc(100% - 90px)); background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 6px 12px 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, .18); font-size: .9rem; }

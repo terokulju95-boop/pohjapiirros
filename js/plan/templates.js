@@ -24,9 +24,10 @@ function container(len, inLen, inH, name) {
   const left = W(tE / 2, OW - tS / 2, tE / 2, tS / 2, tE);
   const data = emptyData();
   data.walls = [top, right, bottom, left];
+  data.walls.forEach(w => { w.matA = "teras"; w.colA = "#8a9aa6"; w.matB = "teras"; });
   const L = OW - tS;
   data.openings = [op("pariovi", right, (L - 2340) / 2, 2340, 2280, 0, { side: -1, label: "Kontin ovet" })];
-  data.rooms = [room(name, tE, tS, len - tE, OW - tS)];
+  data.rooms = [{ ...room(name, tE, tS, len - tE, OW - tS), fmat: "vinyyli" }];
   data.texts = [{ id: uid(), x: 0, y: OW + 700, text: `${name}: ulkomitat ${len} × ${OW}, sisämitat ${inLen} × ${IW}, sisäkorkeus ${inH}`, size: 10 }];
   return { data, settings: { wallH: inH, wallT: 100, grid: 10 } };
 }
@@ -36,21 +37,23 @@ function sauna() {
   const outer = rectWalls(0, 0, 5800, 2200, 150);
   const p1 = W(2050, -75, 2050, 2275, 100), p2 = W(3750, -75, 3750, 2275, 100);
   data.walls = [...outer, p1, p2];
+  outer.forEach(w => { w.matA = "paneeli"; w.matB = "peiterima"; });
+  Object.assign(p1, { matA: "paneeli", matB: "laatta" }); // pukuhuone | pesuhuone
+  Object.assign(p2, { matA: "laatta", matB: "paneeli" }); // pesuhuone | löylyhuone
   const [top, , bottom] = outer;
   data.openings = [
     op("ovi", bottom, 4375, 900, 2100, 0, { label: "9×21 ulko-ovi" }),
-    op("ovi", p1, 275, 800, 2000),
-    op("ovi", p2, 1375, 700, 1900, 0, { label: "7×19 lasiovi" }),
+    op("ovi", p1, 275, 800, 2000, 0, { mat: "huurre" }),
+    op("ovi", p2, 1375, 700, 1900, 0, { label: "7×19 lasiovi", mat: "lasi" }),
     op("ikkuna", bottom, 775, 800, 500, 1100),
     op("ikkuna", top, 775, 900, 900, 900)
   ];
-  data.rooms = [room("Pukuhuone", 0, 0, 2000, 2200), room("Pesuhuone", 2100, 0, 3700, 2200), room("Löylyhuone", 3800, 0, 5800, 2200)];
+  data.rooms = [{ ...room("Pukuhuone", 0, 0, 2000, 2200), fmat: "lauta" }, { ...room("Pesuhuone", 2100, 0, 3700, 2200), fmat: "laatta" }, { ...room("Löylyhuone", 3800, 0, 5800, 2200), fmat: "laatta" }];
   data.items = [
     item("kiuas", 4100, 300, 500, 500, 0, { safe: { f: 0, s: 0, b: 0 } }),
     item("kivilevy", 4100, 15, 900, 30, 0),
     item("laudejakkara", 4500, 1900, 450, 350, 0),
-    item("laude", 5500, 1100, 2200, 600, 90, { label: "Ylälaude" }),
-    item("laude", 5000, 1100, 2200, 400, 90, { label: "Askellaude" }),
+    item("lauteet", 5300, 1100, 2200, 1000, 90, { lu: 600, hu: 1050, ha: 600 }),
     item("seinavalo", 4550, 150, 300, 300, 0, { h: 1200 }),
     item("laude", 200, 800, 1400, 400, 270),
     item("pistorasia", 150, 1700, 300, 300, 270, { h: 300 }),
@@ -66,6 +69,7 @@ function sauna() {
 function extension() {
   const data = emptyData();
   data.walls = rectWalls(0, 0, 6000, 4000, 200, "existing");
+  data.walls.forEach(w => { w.matA = "hirsi"; w.matB = "hirsi"; });
   data.rooms = [room("Nykyinen mökki", 0, 0, 6000, 4000)];
   data.texts = [{ id: uid(), x: 0, y: 4900, text: "Harmaa = olemassa oleva rakennus. Piirrä laajennus Seinä- tai Huone-työkalulla.", size: 10 }];
   return { data, settings: { wallH: 2400, wallT: 200, newStatus: "new" } };
