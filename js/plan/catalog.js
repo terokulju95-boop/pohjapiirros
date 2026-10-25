@@ -42,6 +42,52 @@ const FURN = [
   ["hormi", "Hormi", 400, 400, (w, d) => R(-w / 2, -d / 2, w, d, "sh") + L(-w / 2, -d / 2, w / 2, d / 2) + L(w / 2, -d / 2, -w / 2, d / 2)],
   ["varaaja", "Lämminvesivaraaja", 550, 550, (w, d) => E(0, 0, w / 2, d / 2) + T(0, 0, Math.min(w, d) * .26, "LVV")],
   ["portaat", "Portaat", 900, 2700, (w, d) => box(w, d) + Array.from({ length: Math.max(1, Math.floor(d / 250) - 1) }, (_, i) => L(-w / 2, -d / 2 + (i + 1) * d / Math.floor(d / 250), w / 2, -d / 2 + (i + 1) * d / Math.floor(d / 250))).join("") + P(`M 0 ${d / 2 - 100} L 0 ${-d / 2 + 150} M -90 ${-d / 2 + 300} L 0 ${-d / 2 + 150} L 90 ${-d / 2 + 300}`)],
+  // --- Sauna ---
+  ["puukiuas", "Puukiuas", 450, 600, (w, d) => box(w, d) + R(-w / 2 + 40, -d / 2 + 40, w - 80, d * .55) + [-1, 0, 1].map(a => C(a * w * .22, -d / 2 + 40 + d * .27, Math.min(w, d) * .06, "sf")).join("") + R(-w * .3, d / 2 - d * .3, w * .6, d * .22) + T(0, d * .05, Math.min(w, d) * .16, "PUU"), { hot: true }],
+  ["kivilevy", "Kivilevy / suojalevy seinään", 1200, 30, (w, d) => R(-w / 2, -d / 2, w, d, "sh") + L(-w / 2, d / 2 + 25, w / 2, d / 2 + 25, "sl") , { wall: true }],
+  ["kiuaskaide", "Kiukaan suojakaide", 700, 40, (w, d) => R(-w / 2, -d / 2, w, d, "sh")],
+  ["laudejakkara", "Laudejakkara", 450, 350, (w, d) => box(w, d) + L(-w / 2, -d / 6, w / 2, -d / 6) + L(-w / 2, d / 6, w / 2, d / 6)],
+  ["selkanoja", "Lauteiden selkänoja", 1800, 60, (w, d) => box(w, d) + L(-w / 2, 0, w / 2, 0), { wall: true }],
+  ["lattiaritila", "Lattiaritilä", 1000, 600, (w, d) => box(w, d) + Array.from({ length: Math.max(1, Math.floor(w / 120)) }, (_, i, ) => L(-w / 2 + (i + 1) * w / (Math.floor(w / 120) + 1), -d / 2, -w / 2 + (i + 1) * w / (Math.floor(w / 120) + 1), d / 2)).join("")],
+  ["kiulu", "Löylykiulu ja kauha", 300, 300, (w, d) => E(0, 0, w * .35, d * .35) + L(w * .25, -d * .25, w * .5, -d * .5)],
+  ["pesupata", "Pesupata / vesipata", 550, 550, (w, d) => E(0, 0, w / 2, d / 2) + E(0, 0, w * .32, d * .32), { hot: true }],
+  // --- Pesuhuone ja WC ---
+  ["suihkuseina", "Suihkuseinä (lasi)", 900, 30, (w, d) => R(-w / 2, -d / 2, w, d) + L(-w / 2, 0, w / 2, 0)],
+  ["pesuallaskaappi", "Pesuallaskaappi", 800, 450, (w, d) => box(w, d) + E(0, d * .05, w * .3, d * .3)],
+  ["peilikaappi", "Peilikaappi", 600, 150, (w, d) => box(w, d) + L(-w / 2, d / 2 - 20, w / 2, d / 2 - 20), { wall: true }],
+  ["kuivauskaappi", "Kuivauskaappi", 600, 600, (w, d) => lab(w, d, "KK")],
+  ["pyyhekuivain", "Pyyhekuivain", 500, 100, (w, d) => box(w, d) + [-1, 0, 1].map(a => L(a * w * .3, -d / 2, a * w * .3, d / 2)).join(""), { wall: true }],
+  // --- Keittiö ---
+  ["ylakaappi", "Yläkaappi", 800, 350, (w, d) => `<rect class="sl" x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" stroke-dasharray="${w * .06} ${w * .04}"/>`, { wall: true }],
+  ["mikro", "Mikroaaltouuni", 500, 400, (w, d) => lab(w, d, "MI")],
+  ["saareke", "Keittiösaareke", 1200, 900, (w, d) => box(w, d) + L(-w / 2, -d / 2 + 60, w / 2, -d / 2 + 60)],
+  ["ruokaryhma4", "Ruokaryhmä 4 hlö", 1200, 1700, (w, d) => { const td = d * .47; return R(-w / 2, -td / 2, w, td) + [-1, 1].flatMap(sy => [-1, 1].map(sx => R(sx * w * .22 - 225, sy * (td / 2 + 40) - (sy < 0 ? 450 : 0), 450, 450, "s", 30))).join(""); }],
+  ["ruokaryhma6", "Ruokaryhmä 6 hlö", 1800, 1700, (w, d) => { const td = d * .47; return R(-w / 2, -td / 2, w, td) + [-1, 1].flatMap(sy => [-1, 0, 1].map(sx => R(sx * w * .3 - 225, sy * (td / 2 + 40) - (sy < 0 ? 450 : 0), 450, 450, "s", 30))).join(""); }],
+  // --- Makuuhuone ---
+  ["vauvansanky", "Pinnasänky", 650, 1250, (w, d) => box(w, d) + R(-w / 2 + 50, -d / 2 + 50, w - 100, d - 100)],
+  ["yopoyta", "Yöpöytä", 450, 400, (w, d) => box(w, d) + L(-w / 2, -d / 2 + 50, w / 2, -d / 2 + 50)],
+  ["lipasto", "Lipasto", 800, 450, (w, d) => box(w, d) + L(-w / 2, d / 2 - 50, w / 2, d / 2 - 50)],
+  // --- Olohuone ---
+  ["kulmasohva", "Kulmasohva", 2600, 1700, (w, d) => P(`M ${-w / 2} ${-d / 2} H ${w / 2} V ${d / 2} H ${w / 2 - 900} V ${-d / 2 + 900} H ${-w / 2} Z`, "s") + P(`M ${-w / 2} ${-d / 2 + 220} H ${w / 2 - 220} V ${d / 2}`)],
+  ["sohvapoyta", "Sohvapöytä", 1200, 600, (w, d) => R(-w / 2, -d / 2, w, d, "s", 40)],
+  ["tvtaso", "TV-taso", 1600, 400, (w, d) => box(w, d) + R(-w * .3, -d / 2 - 40, w * .6, 40, "sh")],
+  ["matto", "Matto", 2000, 1400, (w, d) => `<rect class="sl" x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" stroke-dasharray="40 30"/><rect class="sl" x="${-w / 2 + 80}" y="${-d / 2 + 80}" width="${w - 160}" height="${d - 160}" stroke-dasharray="40 30"/>`],
+  // --- Eteinen ---
+  ["naulakko", "Naulakko", 1200, 350, (w, d) => L(-w / 2, -d / 2, w / 2, -d / 2) + Array.from({ length: Math.max(2, Math.floor(w / 250)) }, (_, i, a) => C(-w / 2 + (i + .5) * w / Math.max(2, Math.floor(w / 250)), -d / 2 + 60, 30, "sf")).join("") + `<rect class="sl" x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" stroke-dasharray="40 30"/>`, { wall: true }],
+  ["kenkahylly", "Kenkähylly", 800, 300, (w, d) => box(w, d) + L(-w / 2, 0, w / 2, 0)],
+  ["penkki", "Penkki", 1200, 400, (w, d) => box(w, d)],
+  // --- Lämmitys ja tekniikka ---
+  ["kamiina", "Kamiina", 500, 500, (w, d) => E(0, 0, w / 2, d / 2) + T(0, 0, Math.min(w, d) * .3, "K"), { hot: true }],
+  ["puulaatikko", "Puulaatikko", 600, 400, (w, d) => box(w, d) + L(-w / 2, -d / 2, w / 2, d / 2) + L(w / 2, -d / 2, -w / 2, d / 2)],
+  ["kuivakaymala", "Kuivakäymälä", 600, 800, (w, d) => box(w, d) + E(0, d * .1, w * .3, d * .28) + R(-w / 2, -d / 2, w, d * .2)],
+  ["ilpulko", "ILP-ulkoyksikkö", 800, 300, (w, d) => box(w, d) + C(-w * .15, 0, d * .38) + L(-w * .15 - d * .3, 0, -w * .15 + d * .3, 0)],
+  // --- Ulko ja terassi ---
+  ["ulkopoyta", "Ulkopöytä + penkit", 1800, 1600, (w, d) => R(-w / 2, -d * .25, w, d * .5) + R(-w / 2, -d / 2, w, d * .17) + R(-w / 2, d / 2 - d * .17, w, d * .17)],
+  ["grilli", "Grilli", 600, 500, (w, d) => R(-w / 2, -d / 2, w, d, "s", 60) + [-1, 0, 1].map(a => L(-w * .35, a * d * .25, w * .35, a * d * .25)).join("")],
+  ["aurinkotuoli", "Aurinkotuoli", 650, 1900, (w, d) => R(-w / 2, -d / 2, w, d, "s", 40) + L(-w / 2, -d / 2 + d * .3, w / 2, -d / 2 + d * .3)],
+  ["kaide", "Kaide", 2000, 50, (w, d) => R(-w / 2, -d / 2, w, d, "sh")],
+  ["palju", "Palju / kylpytynnyri", 1800, 1800, (w, d) => E(0, 0, w / 2, d / 2) + E(0, 0, w * .43, d * .43) + R(w * .3, -d * .1, w * .2, d * .2, "sh"), { hot: true }],
+  ["ulkosuihku", "Ulkosuihku", 900, 900, (w, d) => box(w, d) + C(0, 0, 60)],
   ["laatikko", "Muu (oma nimi)", 1000, 600, (w, d, it) => box(w, d) + T(0, 0, Math.max(60, Math.min(w * .9 / Math.max(3, (it?.label || "").length) * 1.6, d * .3)), esc(it?.label || "?"))]
 ];
 
@@ -87,8 +133,20 @@ const LVI = [
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
 export const CATS = [["kaluste", "Kalusteet"], ["sahko", "Sähkö"], ["lvi", "LVI"]];
+// Kalusteryhmät. Sama kaluste voi olla useassa ryhmässä.
+export const GROUPS = [
+  ["sauna", "Sauna", ["kiuas", "puukiuas", "kivilevy", "kiuaskaide", "laude", "laudejakkara", "selkanoja", "lattiaritila", "kiulu", "pesupata", "hormi"]],
+  ["pesu", "Pesuhuone ja WC", ["suihku", "suihkuseina", "wc", "kuivakaymala", "pesuallas", "pesuallaskaappi", "peilikaappi", "amme", "pesukone", "kuivauskaappi", "pyyhekuivain", "varaaja"]],
+  ["keittio", "Keittiö", ["keittiotaso", "ylakaappi", "tiskiallas", "liesi", "puuliesi", "jaakaappi", "pakastin", "astianpesukone", "mikro", "saareke", "ruokaryhma4", "ruokaryhma6", "poyta", "pyoreapoyta", "tuoli"]],
+  ["makuu", "Makuuhuone", ["sanky", "sanky2", "kerrossanky", "vauvansanky", "yopoyta", "lipasto", "kaappi", "hylly"]],
+  ["olo", "Olohuone", ["sohva", "kulmasohva", "nojatuoli", "sohvapoyta", "tvtaso", "hylly", "matto", "takka"]],
+  ["eteinen", "Eteinen ja säilytys", ["naulakko", "kenkahylly", "penkki", "kaappi", "hylly"]],
+  ["lammitys", "Lämmitys ja tekniikka", ["takka", "puuliesi", "kamiina", "hormi", "varaaja", "puulaatikko", "ilpulko", "portaat"]],
+  ["ulko", "Ulko ja terassi", ["ulkopoyta", "grilli", "aurinkotuoli", "kaide", "palju", "ulkosuihku", "ilpulko", "portaat", "puulaatikko"]],
+  ["muut", "Muut", ["laatikko", "portaat", "matto"]]
+];
 export const KINDS = {};
-for (const [k, n, w, d, draw, x] of FURN) KINDS[k] = { k, cat: "kaluste", name: n, w, d, draw, hot: x?.hot };
+for (const [k, n, w, d, draw, x] of FURN) KINDS[k] = { k, cat: "kaluste", name: n, w, d, draw, hot: x?.hot, wall: x?.wall };
 for (const [k, n, svg, h, w = S, d = S] of ELEC) KINDS[k] = { k, cat: "sahko", name: n, w, d, h, wall: h !== null, draw: ELEC_DRAW[k] || (() => svg) };
 for (const [k, n, s, draw] of LVI) KINDS[k] = { k, cat: "lvi", name: n, w: s, d: s, draw, h: null };
 KINDS.seinavalo.wall = true;

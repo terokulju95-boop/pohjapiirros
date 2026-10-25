@@ -16,7 +16,11 @@ export function computeQty(data, S) {
     g.n++; g.len += wlen(w); g.vis += vl; g.gross += vl * h;
     for (const o of data.openings.filter(o => o.wallId === w.id)) g.open += o.w * Math.min(o.h, h);
   }
-  const rooms = data.rooms.map(r => {
+  const terraces = data.rooms.filter(r => r.kind === "terrace").map(r => {
+    const b = bboxPts(r.pts), area = polyArea(r.pts), sp = (r.bw || 117) + (r.gap ?? 6);
+    return { name: r.name || "Terassi", area, dims: isRect(r.pts) ? `${mm(b.x2 - b.x1)} × ${mm(b.y2 - b.y1)}` : "", board: r.bw || 117, jm: area / sp / 1000 * 1.1 };
+  });
+  const rooms = data.rooms.filter(r => r.kind !== "terrace").map(r => {
     const b = bboxPts(r.pts);
     let per = 0; for (let i = 0; i < r.pts.length; i++) { const p = r.pts[i], q = r.pts[(i + 1) % r.pts.length]; per += Math.hypot(q.x - p.x, q.y - p.y); }
     return { name: r.name || "Tila", area: polyArea(r.pts), per, dims: isRect(r.pts) ? `${mm(b.x2 - b.x1)} × ${mm(b.y2 - b.y1)}` : "", floor: r.floor || "", h: r.ch || S.wallH };
@@ -28,7 +32,7 @@ export function computeQty(data, S) {
     const K = KINDS[it.kind]; const nm = K?.name || it.kind;
     return c === "kaluste" ? `${it.label && it.label !== nm ? `${it.label} (${nm})` : nm} ${mm(it.w)} × ${mm(it.d)}` : `${nm}${it.h != null && it.h !== "" ? `, korkeus ${it.h}` : ""}`;
   });
-  return { walls, rooms, openings, items, checks: checks(data, J) };
+  return { walls, rooms, terraces, openings, items, checks: checks(data, J) };
 }
 
 // Kiukaan ja tulisijojen suojaetäisyydet
@@ -75,6 +79,8 @@ export function openQuantities(data, S, projName = "", planName = "") {
     <h3 class="form-h">Tilat</h3>
     ${Q.rooms.length ? `<table class="tbl"><thead><tr><th>Tila</th><th class="r">Mitat</th><th class="r">Ala</th><th class="r">Seinäpinta</th></tr></thead><tbody>${Q.rooms.map(r => `<tr><td>${esc(r.name)}${r.floor ? `<br><small class="muted">${esc(r.floor)}</small>` : ""}</td><td class="r">${r.dims}</td><td class="r">${fi(r.area / 1e6)} m²</td><td class="r">${fi(r.per * r.h / 1e6)} m²</td></tr>`).join("")}<tr class="sum"><td>Yhteensä</td><td></td><td class="r">${fi(totFloor / 1e6)} m²</td><td></td></tr></tbody></table>
       <p class="form-note">Tilan seinäpinta = sisäpiiri × huonekorkeus (aukkoja ei vähennetty).</p>` : `<p class="muted small">Ei tiloja. Tilat lisätään Huone-työkalulla.</p>`}
+    ${Q.terraces.length ? `<h3 class="form-h">Terassit</h3><table class="tbl"><thead><tr><th>Terassi</th><th class="r">Mitat</th><th class="r">Ala</th><th class="r">Lautaa</th></tr></thead><tbody>${Q.terraces.map(t => `<tr><td>${esc(t.name)}</td><td class="r">${t.dims}</td><td class="r">${fi(t.area / 1e6)} m²</td><td class="r">${Math.ceil(t.jm)} jm</td></tr>`).join("")}</tbody></table>
+      <p class="form-note">Lautamäärä: laudan leveys + rako, sisältää 10 % hukan.</p>` : ""}
     <h3 class="form-h">Ovet ja ikkunat</h3>${list(Q.openings)}
     <h3 class="form-h">Sähkö</h3>${list(Q.items.sahko)}
     <h3 class="form-h">LVI</h3>${list(Q.items.lvi)}
@@ -102,6 +108,7 @@ export function openQuantities(data, S, projName = "", planName = "") {
     const t = [`${projName} – ${planName}`, "",
       "SEINÄT", ...STATUS.filter(([k]) => Q.walls[k].n).map(([k]) => `${st[k]}: ${Q.walls[k].n} kpl, ${fi(Q.walls[k].len / 1000, 2)} m, ${fi((Q.walls[k].gross - Q.walls[k].open) / 1e6)} m² (1 puoli, ilman aukkoja)`), "",
       "TILAT", ...Q.rooms.map(r => `${r.name}: ${fi(r.area / 1e6)} m²${r.dims ? ` (${r.dims})` : ""}`), `Yhteensä ${fi(totFloor / 1e6)} m²`, "",
+      ...(Q.terraces.length ? ["TERASSIT", ...Q.terraces.map(t => `${t.name}: ${fi(t.area / 1e6)} m², lautaa n. ${Math.ceil(t.jm)} jm`), ""] : []),
       "OVET JA IKKUNAT", ...Q.openings.map(([k, n]) => `${n} × ${k}`), "",
       "SÄHKÖ", ...Q.items.sahko.map(([k, n]) => `${n} × ${k}`), "",
       "LVI", ...Q.items.lvi.map(([k, n]) => `${n} × ${k}`), "",

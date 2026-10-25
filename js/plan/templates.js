@@ -47,6 +47,8 @@ function sauna() {
   data.rooms = [room("Pukuhuone", 0, 0, 2000, 2200), room("Pesuhuone", 2100, 0, 3700, 2200), room("Löylyhuone", 3800, 0, 5800, 2200)];
   data.items = [
     item("kiuas", 4100, 300, 500, 500, 0, { safe: { f: 0, s: 0, b: 0 } }),
+    item("kivilevy", 4100, 15, 900, 30, 0),
+    item("laudejakkara", 4500, 1900, 450, 350, 0),
     item("laude", 5500, 1100, 2200, 600, 90, { label: "Ylälaude" }),
     item("laude", 5000, 1100, 2200, 400, 90, { label: "Askellaude" }),
     item("seinavalo", 4550, 150, 300, 300, 0, { h: 1200 }),

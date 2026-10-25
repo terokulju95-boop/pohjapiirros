@@ -23,6 +23,7 @@ export const dataOf = p => ({ ...emptyData(), ...(p?.data || {}) });
 // Piirustuksen värit. Editori asettaa muuttujat teeman mukaan, tuloste käyttää vaaleita oletuksia.
 export const PLAN_CSS = `
 .pl-room{fill:var(--p-room,#eef3f7)}
+.pl-deck{fill:var(--p-deck,#f4ebd9);stroke:var(--p-deckl,#a88a55)} .deck-l{fill:none;stroke:var(--p-deckl,#a88a55);stroke-opacity:.55}
 .wo{fill:var(--p-ink,#1d232a);stroke:var(--p-ink,#1d232a);stroke-linejoin:miter}
 .wf-new{fill:var(--p-new,#2c333b)} .wf-existing{fill:var(--p-ex,#a7adb3)}
 .wd{fill:var(--p-paper,#fff);stroke:var(--p-demo,#c0473f);stroke-dasharray:6 4;fill-opacity:.6}
@@ -133,7 +134,21 @@ export function renderPlan(data, S, opts = {}) {
   let out = `<style>${PLAN_CSS}</style>`;
 
   // Tilat (taustaväri)
-  if (Lr.rooms) for (const r of data.rooms || []) if (r.pts?.length > 2) out += `<polygon class="pl-room" points="${pts(r.pts.map(p => [p.x, p.y]))}" pointer-events="none"/>`;
+  if (Lr.rooms) for (const r of data.rooms || []) {
+    if (!(r.pts?.length > 2)) continue;
+    const P = pts(r.pts.map(p => [p.x, p.y]));
+    if (r.kind === "terrace") {
+      // terassi: laudoitus viivoina, rajattu alueeseen
+      const b = bboxPts(r.pts), sp = Math.max(30, (r.bw || 117) + (r.gap ?? 6)), alongX = (r.dir || "x") === "x";
+      const span = alongX ? b.y2 - b.y1 : b.x2 - b.x1, n = Math.min(600, Math.floor(span / sp));
+      let lines = "";
+      if (sp / u >= 1.5) for (let i = 1; i <= n; i++) {
+        const v = (alongX ? b.y1 : b.x1) + i * sp;
+        lines += alongX ? `M ${f(b.x1)} ${f(v)} H ${f(b.x2)} ` : `M ${f(v)} ${f(b.y1)} V ${f(b.y2)} `;
+      }
+      out += `<g pointer-events="none"><clipPath id="cp${r.id}"><polygon points="${P}"/></clipPath><polygon class="pl-deck" points="${P}" stroke-width="${f(u * 1.2)}"/>${lines ? `<path class="deck-l" clip-path="url(#cp${r.id})" stroke-width="${f(u * .6)}" d="${lines}"/>` : ""}</g>`;
+    } else out += `<polygon class="pl-room" points="${P}" pointer-events="none"/>`;
+  }
 
   // Seinät: ensin ääriviivat, sitten täytöt päälle → liitoksissa ei näy sisäviivoja
   if (Lr.walls) {

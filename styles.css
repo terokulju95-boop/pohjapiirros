@@ -9,7 +9,7 @@
   /* piirustuksen värit */
   --p-paper: #ffffff; --p-ink: #1d232a; --p-new: #2c333b; --p-ex: #a7adb3; --p-room: #eef4f8; --p-dim: #2f6690;
   --p-muted: #5f6b75; --p-elec: #c2410c; --p-lvi: #1d6fb8; --p-sel: #e8730c; --p-demo: #c0473f;
-  --g-min: #e9eef3; --g-maj: #d3dde6;
+  --g-min: #e9eef3; --g-maj: #d3dde6; --p-deck: #f4ebd9; --p-deckl: #a88a55;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,7 +19,7 @@
     --bad: #f08c7a; --bad-l: #3a2420; --warn: #e6b95e; --warn-l: #33291a; --ok: #82d1a1; --ok-l: #1d3326; --shadow: none;
     --p-paper: #141b22; --p-ink: #dfe7ee; --p-new: #c9d3dc; --p-ex: #5d6a76; --p-room: #1a2630; --p-dim: #8cbde6;
     --p-muted: #93a2b0; --p-elec: #f59a62; --p-lvi: #6cb4f0; --p-sel: #ffb04a; --p-demo: #f08c7a;
-    --g-min: #1a232c; --g-maj: #24313d;
+    --g-min: #1a232c; --g-maj: #24313d; --p-deck: #2a2418; --p-deckl: #9c8455;
     color-scheme: dark;
   }
 }
@@ -161,7 +161,7 @@ a.pcard:active { transform: scale(.99); }
 .print-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .print-prev { display: grid; place-items: center; background: #8a949c; border-radius: var(--ri); padding: 16px; margin: 10px 0; }
 .pp-paper { background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .3); display: flex; flex-direction: column;
-  --p-paper: #fff; --p-ink: #1d232a; --p-new: #2c333b; --p-ex: #a7adb3; --p-room: #eef4f8; --p-dim: #2f6690; --p-muted: #5f6b75; --p-elec: #c2410c; --p-lvi: #1d6fb8; --p-sel: #1d232a; --p-demo: #c0473f; }
+  --p-paper: #fff; --p-ink: #1d232a; --p-new: #2c333b; --p-ex: #a7adb3; --p-room: #eef4f8; --p-dim: #2f6690; --p-muted: #5f6b75; --p-elec: #c2410c; --p-lvi: #1d6fb8; --p-sel: #1d232a; --p-demo: #c0473f; --p-deck: #f4ebd9; --p-deckl: #a88a55; }
 .pp-draw { display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .pp-tb { border-top: 1px solid #1d232a; }
 
@@ -316,3 +316,10 @@ a.pcard:active { transform: scale(.99); }
 .chip.ok-chip { background: var(--ok-l); color: var(--ok); font-weight: 600; }
 .chip.warn { background: var(--warn-l); color: var(--warn); font-weight: 600; }
 @media (max-width: 560px) { .user-row { flex-wrap: wrap; } .user-btns { width: 100%; justify-content: flex-start; padding-left: 44px; } }
+
+/* Kalusteryhmät ja haku */
+.seg-mini.grp button { font-size: .76rem; padding: 3px 9px; }
+.cat-search { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 9px; padding: 7px 10px; font-size: .9rem; margin-bottom: 10px; }
+.cat-search:focus { outline: 2px solid var(--pri); outline-offset: -1px; }
+.cat-h { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 6px; }
+.cat-h:first-child { margin-top: 0; }

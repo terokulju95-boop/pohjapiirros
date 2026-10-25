@@ -1,6 +1,6 @@
 // Pohjapiirros – service worker: sovellus aukeaa myös ilman verkkoa.
 // Kun päivität sovelluksen tiedostoja GitHubiin, kasvata versionumeroa.
-const CACHE = "piirros-v2";
+const CACHE = "piirros-v3";
 const SDK = "https://www.gstatic.com/firebasejs/10.12.2/";
 const SHELL = ["./", "./index.html", "./styles.css", "./manifest.json", "./firebase-config.js",
   "./js/main.js", "./js/core.js", "./js/views/projects.js", "./js/views/users.js",

@@ -3,7 +3,7 @@
 // =============================================================
 import { uid, wlen, wallDir, project, joints, wallPoly, visLen, polyArea, isRect, bboxPts, planBBox, itemCorners, rot, same, mm, m2 } from "./geom.js";
 import { renderPlan, dimLine, openingGeom, settingsOf, dataOf, LAYERS, DEFAULT_SETTINGS, readable } from "./render.js";
-import { KINDS, CATS, OPENINGS, ROOM_NAMES, STATUS, drawItem } from "./catalog.js";
+import { KINDS, CATS, GROUPS, OPENINGS, ROOM_NAMES, STATUS, drawItem } from "./catalog.js";
 import { openQuantities } from "./quantities.js";
 import { openPrint } from "./print.js";
 
@@ -22,6 +22,7 @@ export const TOOLS = [
   ["lvi", "LVI", "L", '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'],
   ["dim", "Mitta", "M", '<path d="M3 12h18M3 8v8M21 8v8"/><path d="m6 10-3 2 3 2M18 10l3 2-3 2"/>'],
   ["text", "Teksti", "T", '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'],
+  ["terrace", "Terassi", "U", '<path d="M3 8h18v8H3z"/><path d="M7 8v8M11 8v8M15 8v8M19 8v8"/>'],
   ["measure", "Mittaa", "Q", '<path d="M4 17 17 4l3 3L7 20z"/><path d="m8 13 2 2M11 10l2 2M14 7l2 2"/>']
 ];
 const HINTS = {
@@ -34,7 +35,8 @@ const HINTS = {
   lvi: "Valitse symboli ja napsauta paikka",
   dim: "Napsauta mitan alku ja loppu, sitten mittaviivan etäisyys",
   text: "Napsauta tekstin paikka",
-  measure: "Napsauta kaksi pistettä – etäisyys näytetään"
+  measure: "Napsauta kaksi pistettä – etäisyys näytetään",
+  terrace: "Vedä terassin alue – tai napsauta kerran ja anna mitat · kohdistuu seinien ulkonurkkiin"
 };
 const ICON = {
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
@@ -52,7 +54,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     data: structuredClone(dataOf(plan)), S: settingsOf(plan), ro: readOnly,
     zoom: .1, px: 0, py: 0, tool: readOnly ? "pan" : "select", sel: [], hist: [], fut: [],
     cur: { x: 0, y: 0 }, snapPt: null, guides: [], chain: null, lenBuf: "", drag: null,
-    kind: { kaluste: "sanky", sahko: "pistorasia", lvi: "lattiakaivo" }, placeRot: 0,
+    kind: { kaluste: "sanky", sahko: "pistorasia", lvi: "lattiakaivo" }, group: "sauna", search: "", placeRot: 0,
     op: { kind: "ovi", ...structuredClone(OPENINGS) }, roomWalls: true,
     dimDraft: null, measure: null, roomDraft: null, preview: null, pointers: new Map(), pinch: null,
     saveTimer: null, saveState: "saved", lastSaved: JSON.stringify([plan.data || {}, plan.settings || {}]), space: false, clip: null
@@ -289,7 +291,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     }
     if (E.roomDraft?.b) {
       const { a, b } = E.roomDraft, x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y), x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
-      const t = E.roomWalls ? E.S.wallT : 0;
+      const t = E.roomWalls && E.tool === "room" ? E.S.wallT : 0;
       if (t) s += `<rect class="ov-ghost" stroke-width="${f2(u)}" x="${f2(x1 - t)}" y="${f2(y1 - t)}" width="${f2(x2 - x1 + 2 * t)}" height="${f2(y2 - y1 + 2 * t)}"/>`;
       s += `<rect class="ov-ghost-in" stroke-width="${f2(u)}" x="${f2(x1)}" y="${f2(y1)}" width="${f2(x2 - x1)}" height="${f2(y2 - y1)}"/>`;
       s += dimLine(x1, y1, x2, y1, -(t + 18 * u), u, null, "live") + dimLine(x1, y2, x1, y1, -(t + 18 * u), u, null, "live");
@@ -394,12 +396,27 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     panelEl.innerHTML = panelHtml();
     if (focusK) { const el = panelEl.querySelector(`[data-k="${focusK}"]`); if (el && el !== active) { el.focus(); el.select?.(); } }
   }
+  function catListHtml() {
+    const t = E.tool, cur = E.kind[t];
+    const grid = Ks => `<div class="cat-grid">${Ks.map(K => `<button class="cat-item ${K.k === cur ? "on" : ""}" data-kind="${K.k}" title="${esc(K.name)}">${itemIcon(K.k)}<span>${esc(K.name)}</span></button>`).join("")}</div>`;
+    const q = E.search.trim().toLowerCase();
+    if (q) {
+      const hits = Object.values(KINDS).filter(K => (t === "kaluste" || K.cat === t) && K.name.toLowerCase().includes(q));
+      return hits.length ? grid(hits) : `<p class="pn">Ei osumia. Voit käyttää kohdetta "Muu (oma nimi)" ja antaa sille nimen.</p>`;
+    }
+    if (t !== "kaluste") return grid(Object.values(KINDS).filter(K => K.cat === t));
+    if (E.group === "kaikki") return [...GROUPS.map(([, l, ks]) => [l, ks.map(k => KINDS[k])]), ["Sähkö", Object.values(KINDS).filter(K => K.cat === "sahko")], ["LVI", Object.values(KINDS).filter(K => K.cat === "lvi")]]
+      .map(([l, Ks]) => `<h4 class="cat-h">${esc(l)}</h4>` + grid(Ks)).join("");
+    return grid((GROUPS.find(g => g[0] === E.group) || GROUPS[0])[2].map(k => KINDS[k]));
+  }
   function panelHtml() {
     const t = E.tool, S = E.S;
     if (t === "kaluste" || t === "sahko" || t === "lvi") {
-      const cur = E.kind[t];
-      return H(CATS.find(c => c[0] === t)[1]) + `<div class="cat-grid">${Object.values(KINDS).filter(K => K.cat === t).map(K => `<button class="cat-item ${K.k === cur ? "on" : ""}" data-kind="${K.k}" title="${esc(K.name)}">${itemIcon(K.k)}<span>${esc(K.name)}</span></button>`).join("")}</div>
-        <p class="pn">R kääntää ennen sijoittamista (nyt ${E.placeRot}°). Mitat ja nimen voi muuttaa sijoittamisen jälkeen.</p>`;
+      const head = t === "kaluste" ? `<div class="seg-mini grp">${[["kaikki", "Kaikki"], ...GROUPS].map(([k, l]) => `<button data-grp="${k}" class="${E.group === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
+      return H(CATS.find(c => c[0] === t)[1]) + head +
+        `<input class="cat-search" data-search placeholder="Hae${t === "kaluste" ? " kaikista (myös sähkö ja LVI)" : ""}…" value="${esc(E.search)}">
+        <div class="cat-list">${catListHtml()}</div>
+        <p class="pn">R kääntää ennen sijoittamista (nyt ${E.placeRot}°). Seinään kuuluvat (esim. kivilevy, peilikaappi) kiinnittyvät lähimpään seinään. Mitat ja nimen voi muuttaa sijoittamisen jälkeen.</p>`;
     }
     if (t === "opening") {
       const o = E.op[E.op.kind];
@@ -409,6 +426,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     }
     if (t === "wall") return H("Uusi seinä") + inp("s.wallT", "Paksuus (mm)", S.wallT) + inp("s.wallH", "Korkeus (mm)", S.wallH) + sel("s.newStatus", "Tila", S.newStatus, STATUS) +
       `<p class="pn">Seinän pituus mitataan keskilinjasta. Nurkissa seinät liittyvät automaattisesti, ja seinän viereen näytetään sen ulkopinnan pituus.</p>`;
+    if (t === "terrace") return H("Terassi") + `<p class="pn">Terassi on alue, jolle ei tule seiniä. Vedä se rakennuksen viereen – alue kohdistuu seinien ulkonurkkiin. Laudoituksen suunnan ja laudan leveyden voi muuttaa valitsemalla terassin. Kaiteet, portaat ja ulkokalusteet löytyvät Kalusteet → Ulko ja terassi.</p>`;
     if (t === "room") return H("Huone") + chk("roomWalls", "Luo seinät ympärille", E.roomWalls) + inp("s.wallT", "Seinän paksuus (mm)", S.wallT) + sel("s.newStatus", "Seinien tila", S.newStatus, STATUS) +
       `<p class="pn">Huone piirretään sisämitoin. Seinät tulevat sisämitan ulkopuolelle.</p>`;
     if (t === "dim" || t === "text" || t === "measure") return H(TOOLS.find(x => x[0] === t)[1]) + `<p class="pn">${HINTS[t]}</p>`;
@@ -444,6 +462,15 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           (K.hot ? H("Suojaetäisyydet") + `<p class="pn">Katso arvot kiukaan/tulisijan asennusohjeesta. Alue näkyy punaisena katkoviivana.</p><div class="pf2">${inp("i.sf", "Eteen", o.safe?.f || 0)}${inp("i.ss", "Sivuille", o.safe?.s || 0)}</div>${inp("i.sb", "Taakse", o.safe?.b || 0)}` : "") +
           txt("i.note", "Huomio", o.note || "") +
           `<div class="pbtns">${btn("rot90", "Käännä 90°")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
+      }
+      if (ty === "room" && o.kind === "terrace") {
+        const b = bboxPts(o.pts), rect = isRect(o.pts), sp = (o.bw || 117) + (o.gap ?? 6);
+        return H("Terassi") + txt("r.name", "Nimi", o.name) + ro_("Pinta-ala", `${m2(polyArea(o.pts))} m²`) +
+          (rect ? `<div class="pf2">${inp("r.w", "Leveys", mm(b.x2 - b.x1))}${inp("r.h", "Syvyys", mm(b.y2 - b.y1))}</div>` : ro_("Kulmia", o.pts.length)) +
+          sel("r.dir", "Laudoituksen suunta", o.dir || "x", [["x", "Vaakaan (piirustuksessa)"], ["y", "Pystyyn (piirustuksessa)"]]) +
+          `<div class="pf2">${inp("r.bw", "Laudan leveys", o.bw || 117)}${inp("r.gap", "Rako", o.gap ?? 6)}</div>` + inp("r.elev", "Korkeus maasta (mm)", o.elev ?? "") +
+          ro_("Lautaa arviolta", `${Math.ceil(polyArea(o.pts) / sp / 1000 * 1.1)} jm`) +
+          `<div class="pbtns">${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div><p class="pn">Lautamäärässä on 10 % hukka. Kulmia voi siirtää vetämällä neliökahvoista.</p>`;
       }
       if (ty === "room") {
         const b = bboxPts(o.pts), rect = isRect(o.pts);
@@ -527,6 +554,9 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       if (g === "r") {
         if (key === "name") o.name = v;
         if (key === "floor") o.floor = v;
+        if (key === "dir") o.dir = v;
+        if ((key === "bw" || key === "gap") && n >= 0) o[key] = n;
+        if (key === "elev") { if (v === "") delete o.elev; else if (isFinite(n)) o.elev = n; }
         if (key === "ch") { if (v === "") delete o.ch; else if (n > 0) o.ch = n; }
         if ((key === "w" || key === "h") && n > 0) {
           const b = bboxPts(o.pts), x2 = key === "w" ? b.x1 + n : b.x2, y2 = key === "h" ? b.y1 + n : b.y2;
@@ -540,7 +570,9 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
 
   function onPanelClick(e) {
     const kb = e.target.closest("[data-kind]");
-    if (kb) { E.kind[E.tool] = kb.dataset.kind; panel(); return; }
+    if (kb) { E.kind[E.tool] = kb.dataset.kind; panelEl.querySelectorAll(".cat-item").forEach(b => b.classList.toggle("on", b.dataset.kind === kb.dataset.kind)); return; }
+    const gb = e.target.closest("[data-grp]");
+    if (gb) { E.group = gb.dataset.grp; E.search = ""; panel(); return; }
     const ok = e.target.closest("[data-opk]");
     if (ok) { E.op.kind = ok.dataset.opk; panel(); return; }
     const a = e.target.closest("[data-pa]")?.dataset.pa; if (!a) return;
@@ -695,9 +727,10 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     wallClick({ x: a.x + Math.cos(ang) * len, y: a.y + Math.sin(ang) * len });
   }
 
-  function createRoom(x, y, w, h, name, walls) {
+  function createRoom(x, y, w, h, name, walls, kind) {
     mutate(() => {
-      const r = { id: uid(), name: name || `Tila ${E.data.rooms.length + 1}`, pts: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }] };
+      const r = { id: uid(), name: name || (kind === "terrace" ? "Terassi" : `Tila ${E.data.rooms.length + 1}`), pts: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }] };
+      if (kind === "terrace") Object.assign(r, { kind: "terrace", dir: w >= h ? "x" : "y", bw: 117, gap: 6 });
       E.data.rooms.push(r);
       if (walls) for (const wl of rectWallsAround(x, y, w, h, E.S.wallT)) E.data.walls.push(wl);
       E.sel = [r.id];
@@ -706,6 +739,8 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     setTimeout(() => { const el = panelEl?.querySelector('[data-k="r.name"]'); el?.focus(); el?.select(); }, 30);
   }
   function roomDialog(p) {
+    if (E.tool === "terrace") return formSheet("Uusi terassi", [["name", "Nimi", "Terassi"], ["w", "Leveys (mm)", 4000], ["h", "Syvyys (mm)", 2500]],
+      v => { const w = num(v.w), h = num(v.h); if (!(w > 0 && h > 0)) return false; createRoom(p.x, p.y, w, h, v.name, false, "terrace"); });
     formSheet("Uusi huone", [
       ["name", "Nimi", "", "text", ROOM_NAMES], ["w", "Leveys sisämitoin (mm)", 3000], ["h", "Syvyys sisämitoin (mm)", 3000],
       ["walls", "Luo seinät ympärille", E.roomWalls, "check"], ["t", "Seinän paksuus (mm)", E.S.wallT]
@@ -784,7 +819,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       draw(); return;
     }
     if (t === "wall") { wallClick(sp); return; }
-    if (t === "room") { E.roomDraft = { a: sp, sx: e.clientX, sy: e.clientY }; return; }
+    if (t === "room" || t === "terrace") { E.roomDraft = { a: sp, sx: e.clientX, sy: e.clientY }; return; }
     if (t === "opening") {
       const o = openingAt(p); if (!o) { toastMsg("Napsauta seinää"); return; }
       mutate(() => { o.id = uid(); E.data.openings.push(o); });
@@ -883,7 +918,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     if (E.ro && t !== "measure") return;
     E.preview = null;
     if (t === "wall") E.snapPt = E.cur = snapPoint(p, { from: E.chain?.[E.chain.length - 1], free: e.shiftKey });
-    else if (t === "room" || t === "text") E.snapPt = snapPoint(p, { free: e.shiftKey });
+    else if (t === "room" || t === "terrace" || t === "text") E.snapPt = snapPoint(p, { free: e.shiftKey });
     else if (t === "dim") {
       if (E.dimDraft?.b) {
         const { a, b } = E.dimDraft, pr = project(p.x, p.y, a.x, a.y, b.x, b.y);
@@ -903,7 +938,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       const { a, b, sx, sy } = E.roomDraft; E.roomDraft = null;
       if (!b || Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 6) { roomDialog(a); draw(); return; }
       const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-      if (w > 100 && h > 100) createRoom(x1, y1, w, h, "", E.roomWalls); else draw();
+      if (w > 100 && h > 100) { if (E.tool === "terrace") createRoom(x1, y1, w, h, "", false, "terrace"); else createRoom(x1, y1, w, h, "", E.roomWalls); } else draw();
       return;
     }
     if (!D) return;
@@ -1027,6 +1062,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
   root.querySelector(".ed-tools")?.addEventListener("click", e => { const b = e.target.closest("[data-tool]"); if (b) setTool(b.dataset.tool); });
   panelEl?.addEventListener("change", onPanelChange);
   panelEl?.addEventListener("click", onPanelClick);
+  panelEl?.addEventListener("input", e => { if (e.target.matches("[data-search]")) { E.search = e.target.value; panelEl.querySelector(".cat-list").innerHTML = catListHtml(); } });
   root.querySelector(".ed-switch")?.addEventListener("change", e => { flush(); onSwitch?.(e.target.value); });
   root.addEventListener("click", e => {
     const a = e.target.closest("[data-a]")?.dataset.a; if (!a) return;
