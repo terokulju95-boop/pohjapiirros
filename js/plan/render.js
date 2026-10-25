@@ -147,7 +147,7 @@ export function renderPlan(data, S, opts = {}) {
       const b = bboxPts(r.pts), sp = Math.max(30, (r.bw || 117) + (r.gap ?? 6)), alongX = (r.dir || "x") === "x";
       const span = alongX ? b.y2 - b.y1 : b.x2 - b.x1, n = Math.min(600, Math.floor(span / sp));
       let lines = "";
-      if (sp / u >= 1.5) for (let i = 1; i <= n; i++) {
+      if (sp / u >= 1.5 && (!r.fmat || r.fmat === "terassilauta")) for (let i = 1; i <= n; i++) {
         const v = (alongX ? b.y1 : b.x1) + i * sp;
         lines += alongX ? `M ${f(b.x1)} ${f(v)} H ${f(b.x2)} ` : `M ${f(v)} ${f(b.y1)} V ${f(b.y2)} `;
       }

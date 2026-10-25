@@ -20,12 +20,22 @@ export const WALL_MATS = {
 };
 export const FLOOR_MATS = {
   puu: ["Parketti", "#c9a36f", "planks", 1120],
+  laminaatti: ["Laminaatti", "#b9976a", "planks", 1400],
   lauta: ["Lattialauta", "#b88d58", "planksWide", 1200],
+  lankku: ["Leveä lankku", "#a77c4c", "planksWide", 1600],
+  vaneri: ["Vaneri", "#d9bf8f", "ply", 2440],
+  osb: ["OSB-levy", "#c9a46a", "osb", 1200],
   laatta: ["Laatta 200 × 200", "#e9e7e2", "tile", 400],
   isolaatta: ["Laatta 300 × 600", "#bdb8af", "tileL", 600],
+  klinkkeri: ["Klinkkeri (tumma)", "#6e5a4c", "tile", 600],
+  liuskekivi: ["Liuskekivi", "#77746e", "stone", 900],
   betoni: ["Betoni", "#a9a9a4", "noise", 1000],
+  mikrosementti: ["Mikrosementti / epoksi", "#c9c6c0", "noise", 2000],
   vinyyli: ["Vinyyli / muovimatto", "#d8d0c4", null, 0],
-  ritila: ["Puuritilä", "#c49a64", "panelV", 480]
+  matto: ["Kokolattiamatto", "#8b8f94", "noise", 500],
+  korkki: ["Korkki", "#b88e5c", "osb", 600],
+  ritila: ["Puuritilä", "#c49a64", "panelV", 480],
+  terassilauta: ["Terassilauta", "#b48a58", "planksWide", 246]
 };
 export const DOOR_MATS = {
   puu: ["Puu", "#b98a5c", "panelV", 480],

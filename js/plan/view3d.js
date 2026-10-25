@@ -8,6 +8,7 @@ import { joints, wlen, visLen, polyArea, planBBox, mm, m2 } from "./geom.js";
 import { KINDS, OPENINGS } from "./catalog.js";
 import { WALL_MATS, FLOOR_MATS, DOOR_MATS, FRAME_MATS, ITEM_MATS, ROOF_MATS } from "./materials.js";
 import { roofGeom } from "./roof.js";
+import { MODELS } from "./models3d.js";
 
 const M = .001;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -58,6 +59,8 @@ function patternCanvas(kind) {
     case "planks": for (let i = 0; i < 8; i++) { const o = (i * 97) % N; g.fillStyle = gray(225, 30); g.fillRect(0, i * 32, N, 32); grain(0, i * 32, N, 32, 60); line(0, i * 32, N, i * 32, 2); line(o, i * 32, o, i * 32 + 32, 2); } break;
     case "seam": g.fillStyle = "#ececec"; g.fillRect(0, 0, N, N); for (let i = 0; i < 4; i++) { const x = i * 64; g.fillStyle = "#ffffff"; g.fillRect(x, 0, 4, N); g.fillStyle = "#9a9a9a"; g.fillRect(x + 4, 0, 3, N); } break;
     case "tileRoof": for (let r = 0; r < 4; r++) { const gr = g.createLinearGradient(0, r * 64, 0, r * 64 + 64); gr.addColorStop(0, "#9a9a9a"); gr.addColorStop(.3, "#ffffff"); gr.addColorStop(1, "#d0d0d0"); g.fillStyle = gr; g.fillRect(0, r * 64, N, 64); for (let k = 0; k <= 4; k++) { const x = k * 64 + (r % 2 ? 32 : 0); line(x, r * 64, x, r * 64 + 64, 2, "rgba(0,0,0,.3)"); } } break;
+    case "ply": g.fillStyle = "#f2f2f2"; g.fillRect(0, 0, N, N); for (let i = 0; i < 40; i++) { const y = rnd() * N; g.strokeStyle = `rgba(0,0,0,${.04 + rnd() * .06})`; g.lineWidth = 1 + rnd() * 2; g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= N; x += 16) g.lineTo(x, y + Math.sin(x / 30 + i) * 3); g.stroke(); } line(0, 1, N, 1, 2, "rgba(0,0,0,.4)"); line(1, 0, 1, N, 2, "rgba(0,0,0,.4)"); line(N / 2, 0, N / 2, N, 1, "rgba(0,0,0,.25)"); break;
+    case "osb": g.fillStyle = "#e6e6e6"; g.fillRect(0, 0, N, N); for (let i = 0; i < 260; i++) { const v = 170 + rnd() * 85; g.fillStyle = `rgb(${v},${v},${v})`; g.save(); g.translate(rnd() * N, rnd() * N); g.rotate(rnd() * 3.2); g.fillRect(-14, -5, 28 + rnd() * 18, 8 + rnd() * 6); g.restore(); } break;
     case "planksWide": for (let i = 0; i < 2; i++) { g.fillStyle = gray(225, 30); g.fillRect(i * 128, 0, 128, N); grain(i * 128, 0, 128, N, 200); line(i * 128 + 1, 0, i * 128 + 1, N, 3); } break;
   }
   return c;
@@ -185,8 +188,8 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
     groups.forEach(([s0, c, m]) => geo.addGroup(s0, c, m)); geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, [topMat, sideMat]);
-    [topMat, sideMat].forEach(m => m.side = THREE.DoubleSide);
+    const ds = m => { const k = "ds" + m.uuid; return (matCache[k] ||= Object.assign(m.clone(), { side: THREE.DoubleSide })); };
+    const mesh = new THREE.Mesh(geo, [ds(topMat), ds(sideMat)]);
     mesh.castShadow = mesh.receiveShadow = true;
     return mesh;
   }
@@ -267,7 +270,8 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
       const depth = (terrace ? 45 : 25) * M;
       const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
       let fm;
-      if (terrace) {
+      if (terrace && r.fmat && r.fmat !== "terassilauta" && FLOOR_MATS[r.fmat]) fm = matOf(FLOOR_MATS[r.fmat], r.fcol);
+      else if (terrace) {
         fm = matOf(["", "#b48a58", (r.dir || "x") === "x" ? "planksWide" : "planksWide", 2 * ((r.bw || 117) + (r.gap ?? 6))], r.fcol);
         if ((r.dir || "x") === "x") { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getY(i), uv.getX(i)); }
       } else fm = matOf(FLOOR_MATS[r.fmat] || FLOOR_MATS.puu, r.fcol);
@@ -326,6 +330,37 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
       }
     }
 
+    // ---------- Mallien työkalut ja materiaalit ----------
+    const MM = {
+      wood: matOf(["", "#d8b98a", "panelH", 480]), woodV: matOf(["", "#c79a62", "panelV", 480]), woodTop: plain("#b98f5a"), laude: matOf(["", "#e2c393", "panelH", 480]),
+      white: plain("#f3f3f1"), ceramic: plain("#fbfbfa", { roughness: .2 }), steel: plain("#b4b9be", { metalness: .6, roughness: .35 }), chrome: plain("#dfe3e6", { metalness: .9, roughness: .15 }),
+      black: plain("#26282b", { roughness: .55 }), grey: plain("#9aa0a6"), stone: matOf(["", "#7d7b76", "stone", 300]), stone2: plain("#5f5e5a", { roughness: .95 }), stoneWall: matOf(WALL_MATS.kivi),
+      fabric: plain("#6f7b88", { roughness: 1 }), cushion: plain("#8b97a3", { roughness: 1 }), mattress: plain("#f1eee8", { roughness: 1 }), pillow: plain("#ffffff", { roughness: 1 }), blanket: plain("#9fb3c3", { roughness: 1 }),
+      rug: matOf(["", "#a89a85", "noise", 400]), glass, glassDark: plain("#2a2c30", { roughness: .1, metalness: .3 }), mirror: plain("#dfe8ee", { metalness: 1, roughness: .04 }),
+      water: new THREE.MeshStandardMaterial({ color: 0x3f8fc0, transparent: true, opacity: .78, roughness: .08, metalness: .1 }),
+      fire: plain("#ff8a2a", { emissive: 0xff5a00, emissiveIntensity: 1.2 }), firebox: plain("#141414"), screen: plain("#0d0f12", { roughness: .15, metalness: .2 }),
+      counter: plain("#3e4044", { roughness: .4 }), sinkIn: plain("#d7dade", { metalness: .5, roughness: .3 }), burner: plain("#5a1c14", { roughness: .3 }), copper: plain("#b87333", { metalness: .7, roughness: .35 }),
+      kiuas: plain("#4a4d52", { metalness: .4, roughness: .45 }), plaster: plain("#ebe7e0"), log: plain("#6b4a2e"), birch: plain("#e6e0d2"),
+      book1: plain("#8c2f2a"), book2: plain("#2f4f73"), book3: plain("#d9b44a"), book4: plain("#3f6b45"), furn: plain("#cfc6b8"),
+      lamp: plain("#fff6e0", { emissive: st.lights ? 0xffe2b0 : 0x1a1814, emissiveIntensity: st.lights ? 1.6 : 1 }), socket: plain("#f3f3f1", { roughness: .3 }), grille: plain("#55595e", { metalness: .5 }), red: plain("#d23b2c")
+    };
+    const ctx = {
+      H, cut: st.cut, ov: null, h: 0, z0: 0,
+      B: (g, x0, x1, y0, y1, z0, z1, m, edges = false) => box(g, x0, x1, y0, y1, z0, z1, m, edges),
+      C: (g, x, z, r, y0, y1, m, o = {}) => {
+        const geo = new THREE.CylinderGeometry((o.r2 ?? r) * M, r * M, Math.max(.001, (y1 - y0) * M), o.seg || 20, 1, !!o.open);
+        const me = new THREE.Mesh(geo, o.open ? Object.assign(m.clone(), { side: THREE.DoubleSide }) : m);
+        me.position.set(x * M, (y0 + y1) / 2 * M, z * M); if (o.sz) me.scale.z = o.sz; me.castShadow = me.receiveShadow = m !== MM.water && m !== glass; g.add(me); return me;
+      },
+      CX: (g, x0, x1, y, z, r, m) => { const me = new THREE.Mesh(new THREE.CylinderGeometry(r * M, r * M, (x1 - x0) * M, 16), m); me.rotation.z = Math.PI / 2; me.position.set((x0 + x1) / 2 * M, y * M, z * M); me.castShadow = me.receiveShadow = true; g.add(me); return me; },
+      CZ: (g, z0, z1, x, y, r, m) => { const me = new THREE.Mesh(new THREE.CylinderGeometry(r * M, r * M, Math.max(.001, (z1 - z0) * M), 24), m); me.rotation.x = Math.PI / 2; me.position.set(x * M, y * M, (z0 + z1) / 2 * M); me.castShadow = true; g.add(me); return me; },
+      S: (g, x, y, z, r, m, sy = 1, top = false, bottom = false) => {
+        const geo = new THREE.SphereGeometry(r * M, 20, 14, 0, Math.PI * 2, bottom ? Math.PI / 2 : 0, top || bottom ? Math.PI / 2 : Math.PI);
+        const me = new THREE.Mesh(geo, top || bottom ? Object.assign(m.clone(), { side: THREE.DoubleSide }) : m); me.position.set(x * M, y * M, z * M); me.scale.y = sy; me.castShadow = me.receiveShadow = true; g.add(me); return me;
+      },
+      sub: (g, x = 0, y = 0, z = 0, ry = 0, rx = 0) => { const s2 = new THREE.Group(); s2.position.set(x * M, y * M, z * M); s2.rotation.order = "YXZ"; s2.rotation.y = -ry * Math.PI / 180; s2.rotation.x = rx * Math.PI / 180; g.add(s2); return s2; }
+    };
+
     // ---------- Kalusteet, sähkö ja LVI ----------
     for (const it of data.items) {
       const K = KINDS[it.kind]; if (!K) continue;
@@ -343,7 +378,9 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
         const im = ITEM_MATS[it.mat];
         const m = im && im[1] ? matOf(im, it.col) : it.col ? plain(it.col)
           : WOOD.has(it.kind) ? matOf(["", "#d8b98a", "panelH", 480]) : WHITE.has(it.kind) ? plain("#f4f4f2") : DARK.has(it.kind) ? plain("#3a3a3a") : it.kind === "kivilevy" ? matOf(WALL_MATS.kivi) : plain("#cfc6b8");
-        if (shape === "cyl") cyl(g, 0, 0, Math.min(w, d) / 2, z0, z0 + h, m);
+        ctx.ov = im && im[1] ? matOf(im, it.col) : it.col ? plain(it.col) : null; ctx.h = h; ctx.z0 = z0;
+        if (MODELS[it.kind]) MODELS[it.kind](it, ctx, g, MM);
+        else if (shape === "cyl") cyl(g, 0, 0, Math.min(w, d) / 2, z0, z0 + h, m);
         else if (shape === "glass") box(g, -w / 2, w / 2, z0, z0 + h, -d / 2, d / 2, glass, false);
         else if (shape === "stairs") {
           const n = Math.max(2, Math.floor(d / 250)), sh = h / n;
@@ -395,7 +432,8 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
         const floor = ["lattiakaivo", "viemari", "lattialammitys"].includes(it.kind);
         g.userData.info = [it.label || K.name, [[ceiling ? "Sijainti" : floor ? "Sijainti" : "Asennuskorkeus", ceiling ? "katossa" : floor ? "lattiassa" : `${it.h ?? 1000} mm (keskikohta)`]]];
         if (ceiling && st.cut) continue;
-        if (ceiling) cyl(g, 0, 0, it.kind === "spotti" ? 45 : 110, H - 30, H - 5, m);
+        if (MODELS[it.kind]) { ctx.ov = null; MODELS[it.kind](it, ctx, g, MM); }
+        else if (ceiling) cyl(g, 0, 0, it.kind === "spotti" ? 45 : 110, H - 30, H - 5, m);
         else if (floor) box(g, -w * .4, w * .4, 0, 8, -d * .4, d * .4, m, false);
         else if (it.kind === "patteri" || it.kind === "ilp" || it.kind === "keskus") {
           const y0 = it.kind === "patteri" ? 200 : it.kind === "ilp" ? Math.max(1800, (it.h ?? 2100) - 300) : (it.h ?? 1500) - 350;
@@ -411,13 +449,14 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
 
     // ---------- Mittakaavaihminen 175 cm ----------
     if (st.person) {
-      const p = new THREE.Group(), pm = plain("#5d7590"), sk = plain("#e2b896");
+      const p = new THREE.Group(), pm = plain("#4f6a86"), pl = plain("#2f3b4a"), sk = plain("#e2b896");
       p.position.set((b.x1 + 700) * M, 0, (b.y2 + 900) * M);
-      for (const sx of [-1, 1]) box(p, sx * 95 - 60, sx * 95 + 60, 0, 850, -60, 60, pm, false);
-      box(p, -190, 190, 850, 1450, -110, 110, pm, false);
-      for (const sx of [-1, 1]) box(p, sx * 240 - 50, sx * 240 + 50, 800, 1430, -50, 50, pm, false);
-      box(p, -45, 45, 1450, 1530, -45, 45, sk, false);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(.11, 24, 16), sk); head.position.y = 1.64; head.castShadow = true; p.add(head);
+      const cap = (r, len, x, y, z, m, rz = 0) => { const me = new THREE.Mesh(new THREE.CapsuleGeometry(r * M, len * M, 6, 14), m); me.position.set(x * M, y * M, z * M); me.rotation.z = rz; me.castShadow = true; p.add(me); };
+      for (const sx of [-1, 1]) { cap(62, 760, sx * 95, 470, 0, pl); cap(48, 90, sx * 95, 40, 40, plain("#222222"), Math.PI / 2 * 0); }
+      cap(165, 330, 0, 1170, 0, pm); cap(150, 120, 0, 900, 0, pl);
+      for (const sx of [-1, 1]) { cap(48, 520, sx * 225, 1110, 0, pm, sx * .08); cap(42, 40, sx * 245, 800, 0, sk); }
+      cap(45, 60, 0, 1500, 0, sk);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(.105, 24, 18), sk); head.scale.y = 1.12; head.position.y = 1.632; head.castShadow = true; p.add(head);
       p.userData.info = ["Mittakaavahahmo", [["Pituus", "1750 mm"]]];
       root.add(p);
     }
@@ -524,7 +563,7 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
   let last = performance.now(), raf = 0, alive = true;
   function loop(now) {
     if (!alive) return;
-    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    const dt = Math.min(.25, (now - last) / 1000); last = now;
     if (st.mode === "walk") {
       const K = st.keys, sp = (K.has("shift") ? 3 : 1.3) * dt;
       const f = (K.has("w") || K.has("arrowup") || held.has("f") ? 1 : 0) - (K.has("s") || K.has("arrowdown") || held.has("b") ? 1 : 0);

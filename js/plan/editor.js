@@ -496,6 +496,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           sel("r.dir", "Laudoituksen suunta", o.dir || "x", [["x", "Vaakaan (piirustuksessa)"], ["y", "Pystyyn (piirustuksessa)"]]) +
           `<div class="pf2">${inp("r.bw", "Laudan leveys", o.bw || 117)}${inp("r.gap", "Rako", o.gap ?? 6)}</div>` + inp("r.elev", "Korkeus maasta (mm)", o.elev ?? "") +
           ro_("Lautaa arviolta", `${Math.ceil(polyArea(o.pts) / sp / 1000 * 1.1)} jm`) +
+          matRow("r.fmat", "r.fcol", "3D-pinta", FLOOR_MATS, o.fmat || "terassilauta", o.fcol) +
           `<div class="pbtns">${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div><p class="pn">Lautamäärässä on 10 % hukka. Kulmia voi siirtää vetämällä neliökahvoista.</p>`;
       }
       if (ty === "room") {
