@@ -267,10 +267,11 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
       }
     }
     // valitun kohteen apumitat
-    if (E.sel.length === 1 && (!E.drag || E.drag.type === "move")) {
+    if (E.sel.length === 1 && (!E.drag || E.drag.type === "move" || E.drag.type === "we")) {
       const F = find(E.sel[0]);
       if (F?.t === "opening") s += openingDims(F.o, u, j);
       if (F?.t === "item") s += itemDims(F.o, u, j);
+      if (F?.t === "wall") s += wallGaps(F.o, j).map(g => dimLine(g.ax, g.ay, g.bx, g.by, 0, u, null, "live")).join("");
     }
     for (const [x1, y1, x2, y2] of E.guides) s += `<line class="guide" stroke-width="${f2(u)}" x1="${f2(x1)}" y1="${f2(y1)}" x2="${f2(x2)}" y2="${f2(y2)}"/>`;
     if (E.snapPt?.snapped) s += `<rect class="snapmark" stroke-width="${f2(1.5 * u)}" x="${f2(E.snapPt.x - 5 * u)}" y="${f2(E.snapPt.y - 5 * u)}" width="${f2(10 * u)}" height="${f2(10 * u)}"/>`;
@@ -282,6 +283,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         const ghost = { id: "_g", x1: a.x, y1: a.y, x2: b.x, y2: b.y, t };
         s += `<polygon class="ov-ghost" stroke-width="${f2(u)}" points="${wallPoly(ghost).map(([x, y]) => `${f2(x)},${f2(y)}`).join(" ")}"/>`;
         s += dimLine(a.x, a.y, b.x, b.y, -(t / 2 + 16 * u), u, mm(L), "live");
+        s += wallGaps(ghost, j).map(g => dimLine(g.ax, g.ay, g.bx, g.by, 0, u, null, "live")).join("");
       }
       s += `<circle class="snapmark" cx="${f2(a.x)}" cy="${f2(a.y)}" r="${f2(3 * u)}"/>`;
     }
@@ -324,6 +326,32 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
     return s;
   }
   // Kalusteen etäisyydet lähimpiin seinäpintoihin (kun kalusteen kulma on 0/90/180/270)
+  // Säde kohti lähintä seinäpintaa: palauttaa etäisyyden tai Infinity
+  function rayHit(px, py, dx, dy, polys, minT = 0) {
+    let best = Infinity;
+    for (const P of polys) for (let i = 0; i < P.length; i++) {
+      const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length];
+      const sx = x2 - x1, sy = y2 - y1, den = dx * sy - dy * sx;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = ((x1 - px) * sy - (y1 - py) * sx) / den, k = ((x1 - px) * dy - (y1 - py) * dx) / den;
+      if (t > minT && k >= 0 && k <= 1 && t < best) best = t;
+    }
+    return best;
+  }
+  // Seinän vapaa väli viereisiin seiniin molemmin puolin (pinnasta pintaan, seinän keskikohdalta)
+  function wallGaps(w, j) {
+    const L = wlen(w); if (L < 1) return [];
+    const { nx, ny } = wallDir(w), mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+    const polys = E.data.walls.filter(o => o.id !== w.id).map(o => wallPoly(o, j[o.id]));
+    const out = [];
+    for (const side of [1, -1]) {
+      const ax = mx + nx * side * w.t / 2, ay = my + ny * side * w.t / 2;
+      const t = rayHit(ax, ay, nx * side, ny * side, polys, .5);
+      if (t < 30000) out.push({ side, dist: t, ax, ay, bx: ax + nx * side * t, by: ay + ny * side * t, nx: nx * side, ny: ny * side });
+    }
+    return out;
+  }
+  const dirName = (x, y) => Math.abs(x) >= Math.abs(y) ? (x > 0 ? "oikealla" : "vasemmalla") : (y > 0 ? "alapuolella" : "yläpuolella");
   function itemDims(it, u, j) {
     const r = (((it.rot || 0) % 360) + 360) % 360;
     if (r % 90) return "";
@@ -395,6 +423,7 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
         const area = (L + jj.l1 + jj.l2) * (o.h || S.wallH) - ops.reduce((s, x) => s + x.w * x.h, 0);
         return H("Seinä") + inp("w.vis", "Pituus (näkyvä, mm)", mm(visLen(o, jj))) + inp("w.len", "Pituus keskilinjasta (mm)", mm(L)) + inp("w.t", "Paksuus (mm)", o.t) + inp("w.h", "Korkeus (mm)", o.h ?? S.wallH, `placeholder="${S.wallH}"`) +
           sel("w.status", "Tila", o.status || "new", STATUS) + inp("w.ang", "Suunta (°)", ang) +
+          wallGaps(o, j).map(g => inp("w.gap" + g.side, `Väli seinään ${dirName(g.nx, g.ny)} (mm)`, mm(g.dist))).join("") +
           ro_("Seinäpinta, yksi puoli", `${m2(Math.max(0, area))} m²`) + (ops.length ? ro_("Aukkoja", ops.length) : "") +
           `<div class="pbtns">${btn("split", "Jaa kahtia")}${btn("flip", "Käännä suunta")}${btn("dup", "Monista")}${btn("del", "Poista", "danger ghost")}</div>`;
       }
@@ -469,6 +498,10 @@ export function mountEditor(root, { plan, project: proj, readOnly = false, onBac
           if (L > 1) moveWallEnd(o, 2, o.x1 + dx * L, o.y1 + dy * L, linksOf(o, 2));
         }
         if (key === "t" && n > 0) o.t = n;
+        if (key.startsWith("gap") && n >= 0) {
+          const g = wallGaps(o, J()).find(x => String(x.side) === key.slice(3));
+          if (g) { const d = g.dist - n; applyMove(captureMove([o.id]), g.nx * d, g.ny * d); }
+        }
         if (key === "h") { if (v === "") delete o.h; else if (n > 0) o.h = n; }
         if (key === "status") o.status = v;
         if (key === "ang" && isFinite(n)) { const L = wlen(o), a = n * Math.PI / 180; moveWallEnd(o, 2, o.x1 + Math.cos(a) * L, o.y1 + Math.sin(a) * L, linksOf(o, 2)); }
