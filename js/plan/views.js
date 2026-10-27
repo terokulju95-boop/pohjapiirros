@@ -9,6 +9,7 @@ import { roofGeom } from "./roof.js";
 import { WALL_MATS, DOOR_MATS, ROOF_MATS } from "./materials.js";
 import { LAYER_KINDS, wallLayers } from "./walltypes.js";
 import { KINDS } from "./catalog.js";
+import { centroid, outSide, trimSides, cornerTrims } from "./trims.js";
 import { heightOf, baseOf } from "./view3d.js";
 import { openSheet, toast } from "../core.js";
 import { openPrint } from "./print.js";
@@ -50,14 +51,27 @@ function solids(data, S) {
       out.push(fc);
     }
   }
+  for (const q of cornerTrims(data, S)) out.push(...prism(q.pts, 0, q.h, S.cornerCol || "#f3f3f1", { trim: true }));
+  const cen = centroid(data);
   for (const r of data.roofs || []) {
-    const G = roofGeom(r), t = (r.t ?? 250) / Math.cos(Math.atan(G.k)), fill = light((ROOF_MATS[r.mat] || ROOF_MATS.pelti)[1], .25);
+    const G = roofGeom(r), t = (r.t ?? 250) / Math.cos(Math.atan(G.k)), fill = light(r.col || (ROOF_MATS[r.mat] || ROOF_MATS.pelti)[1], .25);
     for (const f0 of G.faces) {
       const top = f0.map(p => [p[0], p[1], p[2] + t]), n = f0.length, slab = [{ pts: top, fill, roof: true, rank: 2 }, { pts: [...f0], fill: "#e9e4d8", roof: true, rank: 0 }];
       for (let i = 0; i < n; i++) { const a = f0[i], b = f0[(i + 1) % n]; slab.push({ pts: [a, b, [b[0], b[1], b[2] + t], [a[0], a[1], a[2] + t]], fill: "#d9d3c6", roof: true, rank: 1 }); }
       out.push(...outward(slab));
     }
-    for (const g of G.gables) out.push({ pts: g.pts, fill: "#ece7de", gable: true, twoSided: true });
+    for (const g of G.gables) {
+      // päätykolmion pinta: katon asetus tai saman suuntaisen seinän ulkopinta
+      let fill = "#ece7de";
+      if (r.gmat && WALL_MATS[r.gmat]) fill = light(r.gcol || WALL_MATS[r.gmat][1]);
+      else {
+        const p = g.pts, hx = p[1][0] - p[0][0], hy = p[1][1] - p[0][1], hl = Math.hypot(hx, hy) || 1, c = p.reduce((a, q) => [a[0] + q[0] / p.length, a[1] + q[1] / p.length], [0, 0]);
+        let best = null, bd = Infinity;
+        for (const w of data.walls) { const L2 = wlen(w) || 1, wx = (w.x2 - w.x1) / L2, wy = (w.y2 - w.y1) / L2; if (Math.abs(wx * hy / hl - wy * hx / hl) > .15) continue; const d = Math.abs((c[0] - w.x1) * -wy + (c[1] - w.y1) * wx); if (d < bd) { bd = d; best = w; } }
+        if (best) { const so = outSide(best, cen); fill = light(so > 0 ? (best.colA || WALL_MATS[best.matA]?.[1] || "#ece7de") : (best.colB || WALL_MATS[best.matB]?.[1] || "#ece7de")); }
+      }
+      out.push({ pts: g.pts, fill, gable: true, twoSided: true });
+    }
   }
   for (const r of data.rooms) if (r.kind === "terrace" && r.pts?.length > 2) out.push(...prism(r.pts.map(p => [p.x, p.y]), -45, 0, "#d8bf98", { terrace: true }));
   // tahkot ulospäin: käännetään, jos normaali osoittaa kappaleen sisään
@@ -117,13 +131,14 @@ export function elevation(data, S, dir) {
   };
 }
 function openingsOn(data, fc, J, sOf, u) {
-  const w = fc.wall, { dx, dy, nx, ny } = wallDir(w), side = fc.side, h = w.t / 2 * side;
+  const w = fc.wall, { dx, dy, nx, ny } = wallDir(w), side = fc.side, h = w.t / 2 * side, cen = centroid(data);
   let s = "";
   for (const o of data.openings.filter(o => o.wallId === w.id)) {
     const ax = w.x1 + dx * o.off + nx * h, ay = w.y1 + dy * o.off + ny * h, bx = ax + dx * o.w, by = ay + dy * o.w;
     const s1 = sOf([ax, ay]), s2 = sOf([bx, by]), lo = Math.min(s1, s2), hi = Math.max(s1, s2);
     if (hi - lo < 1) continue;
     const z0 = o.kind === "ikkuna" ? o.sill || 0 : 0, z1 = z0 + o.h;
+    if (trimSides(o, w, cen).includes(side)) { const tw = o.tw || 95, zb = o.kind === "ikkuna" ? Math.max(0, z0 - tw) : 0; s += `<rect class="vw-l" fill="${o.tcol || "#f3f3f1"}" stroke-width="${f(u * .8)}" x="${f(lo - tw)}" y="${f(-(z1 + tw))}" width="${f(hi - lo + 2 * tw)}" height="${f(z1 + tw - zb)}"/>`; }
     if (o.kind === "ikkuna") {
       s += `<rect class="vw-l" fill="#f4f4f2" stroke-width="${f(u)}" x="${f(lo)}" y="${f(-z1)}" width="${f(hi - lo)}" height="${f(o.h)}"/>`;
       s += `<rect class="vw-l" fill="#cfe2ef" stroke-width="${f(u * .7)}" x="${f(lo + 60)}" y="${f(-z1 + 60)}" width="${f(Math.max(0, hi - lo - 120))}" height="${f(Math.max(0, o.h - 120))}"/>`;
@@ -231,7 +246,7 @@ export function section(data, S, sec) {
       const a = rm.pts[i], b = rm.pts[(i + 1) % rm.pts.length], ca = coord([a.x, a.y]), cb = coord([b.x, b.y]);
       if ((ca - c0) * (cb - c0) <= 0 && ca !== cb) { const k = (c0 - ca) / (cb - ca); xs.push(sOf([a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k])); }
     }
-    if (xs.length >= 2) rooms.push({ s1: Math.min(...xs), s2: Math.max(...xs), ch: rm.ch || H, name: rm.name, terrace: rm.kind === "terrace" });
+    if (xs.length >= 2) rooms.push({ s1: Math.min(...xs), s2: Math.max(...xs), ch: rm.ch || H, name: rm.name, terrace: rm.kind === "terrace", ceil: rm.ceil || "tasainen" });
   }
   // Leikatut kalusteet (esim. lauteet portaittain)
   for (const it of data.items) {
@@ -284,7 +299,7 @@ export function section(data, S, sec) {
       // sisäkatot, huonekorkeudet ja nimet
       for (const rm of rooms) {
         if (rm.terrace) continue;
-        s += `<line class="vw-ceil" stroke-width="${f(u)}" x1="${f(rm.s1)}" y1="${f(-rm.ch)}" x2="${f(rm.s2)}" y2="${f(-rm.ch)}"/>`;
+        if (rm.ceil === "tasainen") s += `<line class="vw-ceil" stroke-width="${f(u)}" x1="${f(rm.s1)}" y1="${f(-rm.ch)}" x2="${f(rm.s2)}" y2="${f(-rm.ch)}"/>`;
         const mx = (rm.s1 + rm.s2) / 2;
         const dx0 = rm.s1 + Math.min(350, (rm.s2 - rm.s1) * .2);
         s += dimLine(dx0, 0, dx0, -rm.ch, 0, u, String(rm.ch));

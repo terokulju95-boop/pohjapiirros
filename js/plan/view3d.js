@@ -9,6 +9,7 @@ import { KINDS, OPENINGS } from "./catalog.js";
 import { WALL_MATS, FLOOR_MATS, DOOR_MATS, FRAME_MATS, ITEM_MATS, ROOF_MATS } from "./materials.js";
 import { roofGeom } from "./roof.js";
 import { MODELS } from "./models3d.js";
+import { centroid, trimSides, cornerTrims, TRIM_T } from "./trims.js";
 
 const M = .001;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -193,12 +194,44 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
     mesh.castShadow = mesh.receiveShadow = true;
     return mesh;
   }
+  // Vino sisäkatto: seuraa katon alapintaa (pienin katon tasoista), ruudukkona tilan sisällä
+  function roofZ(x, y) {
+    let z = Infinity;
+    for (const r of data.roofs || []) {
+      const G = roofGeom(r), o = G.outline; if (x < o.x1 || x > o.x2 || y < o.y1 || y > o.y2) continue;
+      for (const f of G.faces) {
+        const [p0, p1, p2] = f, ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2], vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; if (Math.abs(nz) < 1e-9) continue;
+        z = Math.min(z, p0[2] - (nx * (x - p0[0]) + ny * (y - p0[1])) / nz);
+      }
+    }
+    return z;
+  }
+  function slopedCeiling(r, cm) {
+    const xs = r.pts.map(p => p.x), ys = r.pts.map(p => p.y), x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
+    const nx = Math.max(1, Math.ceil((x2 - x1) / 150)), ny = Math.max(1, Math.ceil((y2 - y1) / 150)), sx = (x2 - x1) / nx, sy = (y2 - y1) / ny;
+    const inside = (x, y) => { let cIn = false; for (let i = 0, j = r.pts.length - 1; i < r.pts.length; j = i++) { const a = r.pts[i], b2 = r.pts[j]; if ((a.y > y) !== (b2.y > y) && x < (b2.x - a.x) * (y - a.y) / (b2.y - a.y) + a.x) cIn = !cIn; } return cIn; };
+    const zAt = (x, y) => { const z = roofZ(x, y); return isFinite(z) ? z - 5 : null; };
+    const pos = [], uv = [], t = cm.userData.tile || 1; let top = 0, ok = false;
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+      const ax = x1 + i * sx, ay = y1 + j * sy, bx = ax + sx, by = ay + sy;
+      if (!inside((ax + bx) / 2, (ay + by) / 2)) continue;
+      const P = [[ax, ay], [bx, ay], [bx, by], [ax, by]].map(([x, y]) => { const z = zAt(x, y); return z == null ? null : [x, z, y]; });
+      if (P.some(q => !q)) continue; ok = true;
+      for (const k of [0, 1, 2, 0, 2, 3]) { const q = P[k]; pos.push(q[0] * M, q[1] * M, q[2] * M); uv.push(q[0] * M / t, q[2] * M / t); top = Math.max(top, q[1]); }
+    }
+    if (!ok) return null;
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2)); geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, cm); mesh.receiveShadow = true;
+    mesh.userData.info = [`${r.name || "Tila"} – vino sisäkatto`, [["Korkein kohta", Math.round(top) + " mm"]]];
+    return mesh;
+  }
   function build() {
     obstacles = [];
     if (root) { scene.remove(root); root.traverse(o => o.geometry?.dispose?.()); }
     root = new THREE.Group(); scene.add(root);
     const J = joints(data.walls);
-    const H = S.wallH || 2400, CUT = 1200;
+    const H = S.wallH || 2400, CUT = 1200, cen = centroid(data);
 
     // ---------- Seinät aukkoineen ----------
     for (const w of data.walls) {
@@ -230,6 +263,14 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
         if (sill + oh < top) seg(a, b, sill + oh, top);
         const og = new THREE.Group(); g.add(og);
         og.userData.info = [OPENINGS[o.kind]?.name || "Aukko", [["Leveys", o.w + " mm"], ["Korkeus", o.h + " mm"], ...(o.kind === "ikkuna" ? [["Alareuna lattiasta", sill + " mm"], ["Yläreuna lattiasta", sill + o.h + " mm"]] : [])]];
+        // pielilaudat
+        for (const sd of trimSides(o, w, cen)) {
+          const tw = o.tw || 95, tm = plain(o.tcol || "#f3f3f1"), z0 = sd * t / 2, z1 = sd * (t / 2 + TRIM_T), zl = Math.min(z0, z1), zh = Math.max(z0, z1);
+          const yTop = Math.min(sill + oh, top), yb = o.kind === "ikkuna" ? Math.max(0, sill - tw) : 0, yh = Math.min(top, yTop + tw);
+          box(og, a - tw, a, yb, yh, zl, zh, tm); box(og, b, b + tw, yb, yh, zl, zh, tm);
+          if (yTop < top) box(og, a, b, yTop, yh, zl, zh, tm);
+          if (o.kind === "ikkuna" && sill > 0) box(og, a, b, yb, sill, zl, zh + (sd > 0 ? 15 : 0), tm);
+        }
         if (o.kind === "ikkuna" && sill < top) {
           // karmit ja lasi
           const fm = plain((FRAME_MATS[o.frame] || FRAME_MATS.valkoinen)[1]), fw = 60, fd = Math.min(t, 100) / 2, y1 = Math.min(sill + oh, top);
@@ -260,6 +301,12 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
       }
       if (cur < L + j.e2) seg(cur, L + j.e2, 0, top);
       root.add(g);
+    }
+
+    // ---------- Nurkkalaudat ----------
+    for (const q of cornerTrims(data, S)) {
+      const hh = st.cut ? Math.min(q.h, CUT) : q.h, cm2 = plain(S.cornerCol || "#f3f3f1");
+      const mesh = prism(q.pts.map(p => [p[0], p[1], 0]), [0, 0, hh], cm2, cm2); mesh.userData.info = ["Nurkkalauta", [["Leveys", (S.cornerW || 120) + " mm"], ["Korkeus", hh + " mm"]]]; root.add(mesh);
     }
 
     // ---------- Lattiat ja terassit ----------
@@ -294,20 +341,28 @@ export async function open3D(host, data, S, { title = "", onClose } = {}) {
         for (const gb of G.gables) {
           const p = gb.pts, c = p.reduce((a, q) => [a[0] + q[0] / p.length, a[1] + q[1] / p.length], [0, 0]);
           // lähin seinä: sen ulkopinnan materiaali päätykolmioon
-          let best = null, bd = Infinity;
-          for (const w of data.walls) { const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2, d = Math.hypot(mx - c[0], my - c[1]); if (d < bd) { bd = d; best = w; } }
           const hx = p[1][0] - p[0][0], hy = p[1][1] - p[0][1], hl = Math.hypot(hx, hy) || 1;
+          // seinä, joka on päätykolmion suuntainen ja lähimpänä sen tasoa
+          let best = null, bd = Infinity;
+          for (const w of data.walls) {
+            const L2 = wlen(w) || 1, wx = (w.x2 - w.x1) / L2, wy = (w.y2 - w.y1) / L2;
+            if (Math.abs(wx * hy / hl - wy * hx / hl) > .15) continue;
+            const d = Math.abs((c[0] - w.x1) * -wy + (c[1] - w.y1) * wx);
+            if (d < bd) { bd = d; best = w; }
+          }
           let nx = -hy / hl, ny = hx / hl; if ((cx0 - c[0]) * nx + (cy0 - c[1]) * ny < 0) { nx = -nx; ny = -ny; }
           const tw = best?.t || 150;
           let gm = matOf(WALL_MATS.maali);
-          if (best) { const L2 = wlen(best) || 1, bnx = -(best.y2 - best.y1) / L2, bny = (best.x2 - best.x1) / L2, outA = bnx * nx + bny * ny < 0; gm = matOf(WALL_MATS[outA ? best.matA : best.matB] || WALL_MATS.maali, outA ? best.colA : best.colB); }
-          rg.add(prism(p, [nx * tw, ny * tw, 0], gm, endMat));
+          if (r.gmat && WALL_MATS[r.gmat]) gm = matOf(WALL_MATS[r.gmat], r.gcol);
+          else if (best) { const L2 = wlen(best) || 1, bnx = -(best.y2 - best.y1) / L2, bny = (best.x2 - best.x1) / L2, outA = bnx * nx + bny * ny < 0; gm = matOf(WALL_MATS[outA ? best.matA : best.matB] || WALL_MATS.maali, outA ? best.colA : best.colB); }
+          const gmesh = prism(p, [nx * tw, ny * tw, 0], gm, gm); gmesh.userData.info = ["Päätykolmio / korotus", [["Pinta", r.gmat && WALL_MATS[r.gmat] ? WALL_MATS[r.gmat][0] : "sama kuin seinän ulkopinta"], ["Muutetaan", "katon paneelista"]]]; rg.add(gmesh);
         }
         root.add(rg);
       }
       for (const r of data.rooms) {
-        if (r.kind === "terrace" || !(r.pts?.length > 2)) continue;
+        if (r.kind === "terrace" || !(r.pts?.length > 2) || r.ceil === "ei") continue;
         const cm = matOf(WALL_MATS[r.cmat] || WALL_MATS.maali, r.ccol);
+        if (r.ceil === "vino") { const vm = slopedCeiling(r, cm); if (vm) { root.add(vm); continue; } }
         const geo = new THREE.ShapeGeometry(new THREE.Shape(r.pts.map(p => new THREE.Vector2(p.x * M, p.y * M))));
         if (cm.userData.tile) { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / cm.userData.tile, uv.getY(i) / cm.userData.tile); }
         const mesh = new THREE.Mesh(geo, cm); mesh.rotation.x = Math.PI / 2; mesh.position.y = (r.ch || H) * M - .002; mesh.receiveShadow = true;
